@@ -4,12 +4,17 @@ layout {
         plugin location="tab-bar"
     }
     pane split_direction="vertical" {
-        pane edit="src/main.rs" size="60%"
-        pane split_direction="horizontal" {
-            pane edit="Cargo.toml"
-            pane {
-                plugin location="file:target/wasm32-wasip1/debug/zellij-project-sidebar.wasm"
+        pane size=25 {
+            plugin location="file:target/wasm32-wasip1/debug/zellij-project-sidebar.wasm" {
+                project_0 "/Users/andrewbeniston/Documents/01-Projects/Git/help-self"
+                project_1 "/Users/andrewbeniston/Documents/01-Projects/Git/tungsten-flow"
+                project_2 "/Users/andrewbeniston/Documents/01-Projects/Git/svg-editor"
+                project_3 "/Users/andrewbeniston/Documents/01-Projects/Git/zellij-project-sidebar"
             }
+        }
+        pane split_direction="horizontal" {
+            pane edit="src/main.rs" size="60%"
+            pane edit="Cargo.toml"
         }
     }
     pane size=1 borderless=true {

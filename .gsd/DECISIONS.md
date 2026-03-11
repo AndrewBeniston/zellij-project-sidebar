@@ -1,0 +1,3 @@
+- "Manual project setup over cargo-generate template (template uses outdated zellij-tile 0.41.1)"
+- "Request all three permissions upfront in load() since dialog is cached by plugin URL"
+- "Edition 2021 over 2024 (battle-tested for wasm32-wasip1, no value from newer edition)"
