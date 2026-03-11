@@ -42,11 +42,12 @@ Plans:
   3. Pressing Enter on a project with a running session switches to that session; pressing Enter on a project with no session creates one with cwd set to that folder
   4. Pressing x on a running session kills it and the list updates to reflect the change
   5. Sidebar pane does not steal focus during normal terminal work -- it becomes selectable only when the user actively interacts with it
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
+- [ ] 02-01-PLAN.md -- Config parsing, session matching, and project list rendering with status indicators
+- [ ] 02-02-PLAN.md -- Keyboard navigation (j/k), session actions (Enter/x), and focus management (Alt+s/Esc)
+- [ ] 02-03-PLAN.md -- Human verification of all 8 requirements in live Zellij
 
 ### Phase 3: Sidebar Layout + Toggle
 **Goal**: The plugin operates as a docked side panel that users can show/hide from any context without needing to focus it first
@@ -83,6 +84,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Scaffold + Lifecycle | 1/1 | Complete | 2026-03-11 |
-| 2. Display + Interaction | 0/? | Not started | - |
+| 2. Display + Interaction | 0/3 | Planning complete | - |
 | 3. Sidebar Layout + Toggle | 0/? | Not started | - |
 | 4. Enrichment + Theme | 0/? | Not started | - |
