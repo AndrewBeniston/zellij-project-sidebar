@@ -2,69 +2,6 @@
 
 ## Active
 
-### DISP-04 — Running sessions show tab count (e.g. `help-self [3]`)
-
-- Status: active
-- Class: core-capability
-- Source: inferred
-- Primary Slice: S03
-
-Running sessions show tab count (e.g. `help-self [3]`)
-
-### DISP-05 — Active pane command displayed for current session (e.g. `claude` or `vim`)
-
-- Status: active
-- Class: core-capability
-- Source: inferred
-- Primary Slice: S03
-
-Active pane command displayed for current session (e.g. `claude` or `vim`)
-
-### DISP-06 — Info verbosity configurable — minimal (name + status dot) through full (tabs + command)
-
-- Status: active
-- Class: core-capability
-- Source: inferred
-- Primary Slice: S03
-
-Info verbosity configurable — minimal (name + status dot) through full (tabs + command)
-
-### INTR-05 — User can toggle sidebar visibility with a keybind (Cmd+P via pipe mechanism)
-
-- Status: active
-- Class: core-capability
-- Source: inferred
-- Primary Slice: S02
-
-User can toggle sidebar visibility with a keybind (Cmd+P via pipe mechanism). Current code has pipe focus via Alt+s — needs full show/hide toggle cycle via Cmd+P (Super p).
-
-### LAYT-03 — Toggle hides/shows sidebar and reclaims/restores space
-
-- Status: active
-- Class: core-capability
-- Source: inferred
-- Primary Slice: S02
-
-Toggle hides/shows sidebar and reclaims/restores space. Current code only shows (show_self) — needs hide_self() and visibility state tracking.
-
-### THEM-01 — Colours match Catppuccin Frappe via Zellij's color_range API
-
-- Status: active
-- Class: core-capability
-- Source: inferred
-- Primary Slice: S03
-
-Colours match Catppuccin Frappe via Zellij's color_range API
-
-### THEM-02 — Status indicators use semantic colours (green = running, dim = stopped, yellow = exited)
-
-- Status: active
-- Class: core-capability
-- Source: inferred
-- Primary Slice: S03
-
-Status indicators use semantic colours (green = running, dim = stopped, yellow = exited)
-
 ## Validated
 
 ### INFR-01 — Plugin compiles to wasm32-wasip1 and loads in Zellij 0.43.1
@@ -110,7 +47,7 @@ Plugin renders a list of pinned project folders from KDL config. Validated: load
 - Source: inferred
 - Primary Slice: S01
 
-Each project shows live session status (running / exited / not started). Validated: SessionUpdate handler matches sessions to projects, render shows status chars.
+Each project shows live session status (running / exited / not started). Validated: SessionUpdate handler matches sessions to projects, render shows status dots with semantic colors.
 
 ### DISP-03 — Current active session is visually highlighted
 
@@ -119,7 +56,34 @@ Each project shows live session status (running / exited / not started). Validat
 - Source: inferred
 - Primary Slice: S01
 
-Current active session is visually highlighted. Validated: `>` indicator for is_current session, selected() for cursor position.
+Current active session is visually highlighted. Validated: selected() for cursor position, green dot for running sessions.
+
+### DISP-04 — Running sessions show tab count (e.g. `help-self [3]`)
+
+- Status: validated
+- Class: core-capability
+- Source: inferred
+- Primary Slice: S03
+
+Running sessions show tab count (e.g. `help-self [3]`). Validated: SessionUpdate extracts session.tabs.len(), render appends `[N]` in full verbosity mode.
+
+### DISP-05 — Active pane command displayed for current session (e.g. `claude` or `vim`)
+
+- Status: validated
+- Class: core-capability
+- Source: inferred
+- Primary Slice: S03
+
+Active pane command displayed for current session (e.g. `claude` or `vim`). Validated: SessionUpdate finds focused non-plugin pane in active tab, extracts terminal_command basename, render appends command in full verbosity mode.
+
+### DISP-06 — Info verbosity configurable — minimal (name + status dot) through full (tabs + command)
+
+- Status: validated
+- Class: core-capability
+- Source: inferred
+- Primary Slice: S03
+
+Info verbosity configurable — minimal (name + status dot) through full (tabs + command). Validated: `verbosity` KDL config key parsed in load(), controls render output between Minimal and Full modes.
 
 ### INTR-01 — User can navigate project list with j/k keys
 
@@ -157,6 +121,15 @@ If no session exists for a folder, Enter creates one with cwd set to that folder
 
 User can kill a session by pressing x on a running project. Validated: kill_selected_session() with current-session guard.
 
+### INTR-05 — User can toggle sidebar visibility with a keybind (Cmd+P via pipe mechanism)
+
+- Status: validated
+- Class: core-capability
+- Source: inferred
+- Primary Slice: S03
+
+User can toggle sidebar visibility with a keybind (Cmd+P via pipe mechanism). Validated: setup_toggle_keybind() registers `Super p` via reconfigure, pipe handler dispatches "toggle_sidebar" message to toggle_visibility().
+
 ### INFR-04 — Sidebar is unselectable by default — becomes selectable only during active interaction
 
 - Status: validated
@@ -164,7 +137,7 @@ User can kill a session by pressing x on a running project. Validated: kill_sele
 - Source: inferred
 - Primary Slice: S01
 
-Sidebar is unselectable by default — becomes selectable only during active interaction. Validated: set_selectable(false) after permissions, set_selectable(true) on pipe focus, set_selectable(false) on Esc/action.
+Sidebar is unselectable by default — becomes selectable only during active interaction. Validated: set_selectable(false) after permissions, set_selectable(true) on toggle show, set_selectable(false) on Esc/action/hide.
 
 ### INFR-05 — Pipe-based toggle mechanism works from any context (unfocused)
 
@@ -173,7 +146,7 @@ Sidebar is unselectable by default — becomes selectable only during active int
 - Source: inferred
 - Primary Slice: S01
 
-Pipe-based toggle mechanism works from any context (unfocused). Validated: pipe() handler for "focus_sidebar" message. Note: needs upgrade from Alt+s to Cmd+P and full hide/show cycle in S02.
+Pipe-based toggle mechanism works from any context (unfocused). Validated: pipe() handler for "toggle_sidebar" and legacy "focus_sidebar" messages. Upgraded from Alt+s to Super p (Cmd+P) in S03.
 
 ### LAYT-01 — Plugin renders as a docked side panel (tiled pane, not floating)
 
@@ -192,6 +165,33 @@ Plugin renders as a docked side panel (tiled pane, not floating). Validated: sho
 - Primary Slice: S01
 
 Sidebar has fixed width (configurable, default ~20 chars). Validated: Dev layout sets size=25 on plugin pane.
+
+### LAYT-03 — Toggle hides/shows sidebar and reclaims/restores space
+
+- Status: validated
+- Class: core-capability
+- Source: inferred
+- Primary Slice: S03
+
+Toggle hides/shows sidebar and reclaims/restores space. Validated: toggle_visibility() calls hide_self() to hide (reclaims space) and show_self(false) to show (restores tiled pane). is_hidden state tracks visibility.
+
+### THEM-01 — Colours match Catppuccin Frappe via Zellij's color_range API
+
+- Status: validated
+- Class: core-capability
+- Source: inferred
+- Primary Slice: S03
+
+Colours match Catppuccin Frappe via Zellij's color_range API. Validated: Semantic color constants map to Zellij palette indices (green=0, yellow=3, blue=4, gray=7) which resolve to Catppuccin Frappe colors when the user's theme is configured.
+
+### THEM-02 — Status indicators use semantic colours (green = running, dim = stopped, yellow = exited)
+
+- Status: validated
+- Class: core-capability
+- Source: inferred
+- Primary Slice: S03
+
+Status indicators use semantic colours (green = running, dim = stopped, yellow = exited). Validated: Status dots use COLOR_GREEN for running, COLOR_YELLOW for exited, COLOR_GRAY for not-started. Header uses COLOR_BLUE, metadata uses COLOR_GRAY.
 
 ## Deferred
 
