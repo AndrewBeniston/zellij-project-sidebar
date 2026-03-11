@@ -27,10 +27,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. Running `cargo build --target wasm32-wasip1` produces a .wasm file that loads in Zellij 0.43.1 without errors
   2. On first load, plugin presents a permission prompt and proceeds after user grants permissions
   3. Plugin receives SessionUpdate events and logs session data to stderr (visible in Zellij logs)
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 01-01: TBD
+- [ ] 01-01-PLAN.md -- Rust WASM plugin scaffold with permissions, event subscriptions, and dev layout
 
 ### Phase 2: Display + Interaction
 **Goal**: Users see their pinned projects with live session status and can navigate, switch, create, and kill sessions entirely from the sidebar
@@ -82,7 +82,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Scaffold + Lifecycle | 0/? | Not started | - |
+| 1. Scaffold + Lifecycle | 0/1 | Planning complete | - |
 | 2. Display + Interaction | 0/? | Not started | - |
 | 3. Sidebar Layout + Toggle | 0/? | Not started | - |
 | 4. Enrichment + Theme | 0/? | Not started | - |
