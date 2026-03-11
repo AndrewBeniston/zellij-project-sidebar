@@ -1,0 +1,23 @@
+layout {
+    cwd "."
+    pane size=1 borderless=true {
+        plugin location="tab-bar"
+    }
+    pane split_direction="vertical" {
+        pane edit="src/main.rs" size="60%"
+        pane split_direction="horizontal" {
+            pane edit="Cargo.toml"
+            pane {
+                plugin location="file:target/wasm32-wasip1/debug/zellij-project-sidebar.wasm"
+            }
+        }
+    }
+    pane size=1 borderless=true {
+        plugin location="status-bar"
+    }
+    floating_panes {
+        pane {
+            plugin location="https://github.com/zellij-org/develop-rust-plugin/releases/download/v0.3.0/develop-rust-plugin.wasm"
+        }
+    }
+}

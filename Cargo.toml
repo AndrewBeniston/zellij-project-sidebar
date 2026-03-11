@@ -1,0 +1,13 @@
+[package]
+name = "zellij-project-sidebar"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+zellij-tile = "0.43.1"
+serde = { version = "1.0", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = "debuginfo"
