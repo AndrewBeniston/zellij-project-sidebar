@@ -1,3 +1,19 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: planning
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-03-11T21:02:21.381Z"
+last_activity: 2026-03-11 -- Completed 01-01-PLAN.md (Rust WASM plugin scaffold)
+progress:
+  total_phases: 4
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 100
+---
+
 # Project State
 
 ## Project Reference
@@ -5,33 +21,33 @@
 See: .planning/PROJECT.md (updated 2026-03-11)
 
 **Core value:** One-keypress project switching with always-visible session awareness
-**Current focus:** Phase 1: Scaffold + Lifecycle
+**Current focus:** Phase 1: Scaffold + Lifecycle (complete) -- ready for Phase 2
 
 ## Current Position
 
-Phase: 1 of 4 (Scaffold + Lifecycle)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-03-11 -- Roadmap created (4 phases, 21 requirements mapped)
+Phase: 1 of 4 (Scaffold + Lifecycle) -- COMPLETE
+Plan: 1 of 1 in current phase (all plans done)
+Status: Phase 1 complete, ready for Phase 2 planning
+Last activity: 2026-03-11 -- Completed 01-01-PLAN.md (Rust WASM plugin scaffold)
 
-Progress: [..........] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
-- Average duration: -
-- Total execution time: 0 hours
+- Total plans completed: 1
+- Average duration: 5min
+- Total execution time: 5min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| Phase 01 P01 | 5min | 2 tasks | 6 files |
 
 **Recent Trend:**
-- Last 5 plans: -
-- Trend: -
+- Last 5 plans: 5min
+- Trend: baseline
 
 *Updated after each plan completion*
 
@@ -44,6 +60,9 @@ Recent decisions affecting current work:
 
 - [Roadmap]: 4-phase coarse structure -- scaffold, display+interaction, layout+toggle, enrichment+theme
 - [Research]: wasm32-wasip1 target (not wasm32-wasi), pipe() for toggle (not Key events), SessionUpdate for live data (not polling)
+- [Phase 01]: Manual project setup over cargo-generate template (outdated zellij-tile 0.41.1)
+- [Phase 01]: All permissions requested upfront in load() (dialog cached by plugin URL)
+- [Phase 01]: Edition 2021 over 2024 (battle-tested for wasm32-wasip1, no added value)
 
 ### Pending Todos
 
@@ -57,6 +76,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-11
-Stopped at: Roadmap created, ready for Phase 1 planning
+Last session: 2026-03-11T21:02:21.379Z
+Stopped at: Completed 01-01-PLAN.md
 Resume file: None

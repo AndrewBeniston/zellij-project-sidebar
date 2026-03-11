@@ -30,9 +30,9 @@
 
 ### Infrastructure
 
-- [ ] **INFR-01**: Plugin compiles to wasm32-wasip1 and loads in Zellij 0.43.1
-- [ ] **INFR-02**: Plugin requests and handles permissions correctly (first-launch UX)
-- [ ] **INFR-03**: Plugin subscribes to SessionUpdate events for live data (no polling)
+- [x] **INFR-01**: Plugin compiles to wasm32-wasip1 and loads in Zellij 0.43.1
+- [x] **INFR-02**: Plugin requests and handles permissions correctly (first-launch UX)
+- [x] **INFR-03**: Plugin subscribes to SessionUpdate events for live data (no polling)
 - [ ] **INFR-04**: Sidebar is unselectable by default — becomes selectable only during active interaction
 - [ ] **INFR-05**: Pipe-based toggle mechanism works from any context (unfocused)
 
@@ -78,9 +78,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFR-01 | Phase 1 | Pending |
-| INFR-02 | Phase 1 | Pending |
-| INFR-03 | Phase 1 | Pending |
+| INFR-01 | Phase 1 | Complete |
+| INFR-02 | Phase 1 | Complete |
+| INFR-03 | Phase 1 | Complete |
 | DISP-01 | Phase 2 | Pending |
 | DISP-02 | Phase 2 | Pending |
 | DISP-03 | Phase 2 | Pending |

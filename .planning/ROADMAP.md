@@ -12,7 +12,7 @@ Four phases take this from zero to a fully themed, docked project sidebar. Phase
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Scaffold + Lifecycle** - Compiling WASM plugin that loads in Zellij, requests permissions, and subscribes to session events
+- [x] **Phase 1: Scaffold + Lifecycle** - Compiling WASM plugin that loads in Zellij, requests permissions, and subscribes to session events
 - [ ] **Phase 2: Display + Interaction** - Pinned project list with live session status, keyboard navigation, and session switch/create/kill
 - [ ] **Phase 3: Sidebar Layout + Toggle** - Docked side panel with fixed width and Cmd+P pipe-based visibility toggle
 - [ ] **Phase 4: Enrichment + Theme** - Tab count, active command, info verbosity modes, and Catppuccin Frappe colours
@@ -30,7 +30,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 1 plan
 
 Plans:
-- [ ] 01-01-PLAN.md -- Rust WASM plugin scaffold with permissions, event subscriptions, and dev layout
+- [x] 01-01-PLAN.md -- Rust WASM plugin scaffold with permissions, event subscriptions, and dev layout
 
 ### Phase 2: Display + Interaction
 **Goal**: Users see their pinned projects with live session status and can navigate, switch, create, and kill sessions entirely from the sidebar
@@ -82,7 +82,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Scaffold + Lifecycle | 0/1 | Planning complete | - |
+| 1. Scaffold + Lifecycle | 1/1 | Complete | 2026-03-11 |
 | 2. Display + Interaction | 0/? | Not started | - |
 | 3. Sidebar Layout + Toggle | 0/? | Not started | - |
 | 4. Enrichment + Theme | 0/? | Not started | - |
