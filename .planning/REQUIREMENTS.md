@@ -83,28 +83,28 @@
 | INFR-03 | Phase 1 | Pending |
 | DISP-01 | Phase 2 | Pending |
 | DISP-02 | Phase 2 | Pending |
-| DISP-03 | Phase 3 | Pending |
-| DISP-04 | Phase 3 | Pending |
-| DISP-05 | Phase 3 | Pending |
-| DISP-06 | Phase 3 | Pending |
-| INTR-01 | Phase 3 | Pending |
-| INTR-02 | Phase 3 | Pending |
-| INTR-03 | Phase 3 | Pending |
-| INTR-04 | Phase 3 | Pending |
-| INFR-04 | Phase 3 | Pending |
-| INTR-05 | Phase 4 | Pending |
-| LAYT-01 | Phase 4 | Pending |
-| LAYT-02 | Phase 4 | Pending |
-| LAYT-03 | Phase 4 | Pending |
-| INFR-05 | Phase 4 | Pending |
-| THEM-01 | Phase 5 | Pending |
-| THEM-02 | Phase 5 | Pending |
+| DISP-03 | Phase 2 | Pending |
+| INTR-01 | Phase 2 | Pending |
+| INTR-02 | Phase 2 | Pending |
+| INTR-03 | Phase 2 | Pending |
+| INTR-04 | Phase 2 | Pending |
+| INFR-04 | Phase 2 | Pending |
+| LAYT-01 | Phase 3 | Pending |
+| LAYT-02 | Phase 3 | Pending |
+| LAYT-03 | Phase 3 | Pending |
+| INTR-05 | Phase 3 | Pending |
+| INFR-05 | Phase 3 | Pending |
+| DISP-04 | Phase 4 | Pending |
+| DISP-05 | Phase 4 | Pending |
+| DISP-06 | Phase 4 | Pending |
+| THEM-01 | Phase 4 | Pending |
+| THEM-02 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 21 total
 - Mapped to phases: 21
-- Unmapped: 0 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-11*
-*Last updated: 2026-03-11 after initial definition*
+*Last updated: 2026-03-11 after roadmap creation (4-phase structure)*
