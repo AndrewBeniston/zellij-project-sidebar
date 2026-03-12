@@ -4,6 +4,12 @@ A persistent sidebar plugin for [Zellij](https://zellij.dev) that shows your act
 
 ![screenshot](screenshot.png)
 
+## Quick start
+
+Give this prompt to Claude Code (or your AI coding tool of choice) and it will handle everything:
+
+> Install the zellij-project-sidebar plugin from https://github.com/AndrewBeniston/zellij-project-sidebar. Clone the repo, build with `cargo build --target wasm32-wasip1 --release`, copy the .wasm to `~/.config/zellij/plugins/`. Then update my Zellij layout to include the sidebar with `scan_dir` pointing to my projects directory. Also set up Claude Code hooks in `~/.claude/settings.json` so the sidebar shows attention indicators when Claude is waiting for input (use the `sidebar::attention::` and `sidebar::clear::` pipe messages documented in the README).
+
 ## Why?
 
 Zellij has great session management, but no ambient awareness. You can't see at a glance which projects are running, which session you're in, or which one has Claude Code waiting for input. This plugin gives you a docked sidebar that stays visible across tabs. Think VS Code's sidebar, but for terminal sessions.
