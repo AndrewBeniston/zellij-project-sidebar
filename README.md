@@ -183,6 +183,13 @@ zellij pipe --name "sidebar::attention::my-project"
 
 The current session's entire line is highlighted in green.
 
+## Pairs well with
+
+This plugin handles session-level awareness. For the full picture, it works nicely alongside:
+
+- [**zellij-sessionizer**](https://github.com/lapce/zellij-sessionizer): fuzzy directory search for starting sessions from anywhere on disk, not just your `scan_dir`. Good for one-off projects.
+- [**zellij-choose-tree**](https://github.com/lapce/zellij-choose-tree): tree view for jumping between tabs and panes *within* a session. The sidebar handles between-session navigation, choose-tree handles within-session.
+
 ## Requirements
 
 - Zellij 0.43.x+
