@@ -23,6 +23,7 @@ Zellij has great session management, but no ambient awareness. You can't see at 
 - **Session lifecycle**: create, switch to, or kill sessions from the sidebar
 - **Auto-discovery**: scans a directory for projects instead of manual configuration
 - **New tab with sidebar**: `Cmd+T` creates tabs that include the sidebar
+- **Mouse support**: click a project to switch, scroll wheel to navigate
 - **Toggle visibility**: `Cmd+O` to focus/unfocus the sidebar
 - **Fuzzy search**: subsequence matching in browse mode
 
@@ -94,6 +95,8 @@ plugin location="file:~/.config/zellij/plugins/zellij-project-sidebar.wasm" {
 | `/` | Enter browse mode (search all projects) |
 | `Esc` | Deactivate sidebar |
 | `Alt+R` | Rescan project directory |
+| Click | Switch to clicked project |
+| Scroll | Navigate projects |
 
 ### Browse mode
 

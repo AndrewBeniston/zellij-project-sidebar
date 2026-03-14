@@ -637,6 +637,7 @@ impl ZellijPlugin for State {
             EventType::SessionUpdate,
             EventType::PermissionRequestResult,
             EventType::Key,
+            EventType::Mouse,
         ];
         if self.use_discovery {
             events.push(EventType::RunCommandResult);
@@ -727,6 +728,46 @@ impl ZellijPlugin for State {
                     self.initial_load_complete = true;
                 }
                 true
+            }
+            Event::Mouse(mouse) => {
+                match mouse {
+                    Mouse::LeftClick(line, _col) => {
+                        let click_y = line as usize;
+                        let y_offset: usize = if self.browse_mode { 1 } else { 0 };
+
+                        if click_y < y_offset {
+                            // Clicked on search bar — ignore
+                            return true;
+                        }
+
+                        let render_lines = self.build_render_lines();
+                        let render_idx = self.scroll_offset + (click_y - y_offset);
+
+                        if render_idx < render_lines.len() {
+                            if let RenderLine::ProjectRow(project_idx) = render_lines[render_idx] {
+                                let filtered = self.filtered_indices();
+                                if let Some(fi) = filtered.iter().position(|&i| i == project_idx) {
+                                    self.selected_index = fi;
+                                    self.activate_selected_project();
+                                }
+                            }
+                        }
+                        true
+                    }
+                    Mouse::ScrollUp(_) => {
+                        self.selected_index = self.selected_index.saturating_sub(1);
+                        true
+                    }
+                    Mouse::ScrollDown(_) => {
+                        let filtered_len = self.filtered_indices().len();
+                        if filtered_len > 0 {
+                            self.selected_index = (self.selected_index + 1)
+                                .min(filtered_len.saturating_sub(1));
+                        }
+                        true
+                    }
+                    _ => false,
+                }
             }
             Event::Key(key) => match key.bare_key {
                 // --- Navigation (always works) ---
