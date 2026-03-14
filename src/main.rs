@@ -219,6 +219,12 @@ fn fuzzy_matches(name: &str, query: &str) -> bool {
     true
 }
 
+fn render_progress_bar(pct: u8, width: usize) -> String {
+    let filled = ((pct as usize) * width) / 100;
+    let empty = width.saturating_sub(filled);
+    "━".repeat(filled) + &"░".repeat(empty)
+}
+
 // --- State Methods ---
 
 impl State {
@@ -619,10 +625,10 @@ layout {
 
         let line = match self.verbosity {
             Verbosity::Minimal => {
-                format!(" {} {}", status_dot, project.name)
+                format!(" │ {} {}", status_dot, project.name)
             }
             Verbosity::Full => {
-                let mut parts = format!(" {} {}", status_dot, project.name);
+                let mut parts = format!(" │ {} {}", status_dot, project.name);
                 if let SessionStatus::Running { tab_count, .. } = &project.status {
                     parts.push_str(&format!(" [{}]", tab_count));
                 }
@@ -652,30 +658,46 @@ layout {
             text = text.selected();
         }
 
+        // Determine the border + dot color based on attention, session status, and agent state
+        // Format is " │ ● name" — │ is at char index 1, dot is at char index 3
+        let border_dot_color = if needs_attention {
+            COLOR_RED
+        } else if is_current_session {
+            COLOR_GREEN
+        } else {
+            match &project.metadata.agent.state {
+                AgentState::Active => COLOR_GREEN,
+                AgentState::Waiting => COLOR_YELLOW,
+                AgentState::Idle => COLOR_GRAY,
+                AgentState::Unknown => {
+                    // Fall back to session-status-based coloring
+                    match &project.status {
+                        SessionStatus::Running { .. } => COLOR_GREEN,
+                        SessionStatus::Exited => COLOR_YELLOW,
+                        SessionStatus::NotStarted => COLOR_GRAY,
+                    }
+                }
+            }
+        };
+
         if needs_attention {
-            // Red dot for attention needed
-            text = text.color_range(COLOR_RED, 1..2);
+            // Red border and diamond dot for attention needed
+            text = text.color_range(border_dot_color, 1..2); // │ border
+            text = text.color_range(border_dot_color, 3..4); // dot
         } else if is_current_session {
             // Highlight entire line green for the current session
             text = text.color_range(COLOR_GREEN, 0..display_line.chars().count());
         } else {
-            // Just color the status dot
-            match &project.status {
-                SessionStatus::Running { .. } => {
-                    text = text.color_range(COLOR_GREEN, 1..2);
-                }
-                SessionStatus::Exited => {
-                    text = text.color_range(COLOR_YELLOW, 1..2);
-                }
-                SessionStatus::NotStarted => {
-                    text = text.color_range(COLOR_GRAY, 1..2);
-                }
-            }
+            // Color the left border (│ at char index 1) and the status dot (char index 3)
+            text = text.color_range(border_dot_color, 1..2); // │ border
+            text = text.color_range(border_dot_color, 3..4); // dot
         }
 
         if self.verbosity == Verbosity::Full && !is_current_session {
             if let SessionStatus::Running { tab_count, is_current, active_command, .. } = &project.status {
-                let name_end = 3 + project.name.chars().count();
+                // Format: " │ ● name [N] cmd" — dot is at index 3, name starts at 5
+                // name_end = 5 (prefix " │ ● ") + name.chars().count()
+                let name_end = 5 + project.name.chars().count();
                 let bracket_str = format!("[{}]", tab_count);
                 let bracket_start = name_end + 1;
                 let bracket_end = bracket_start + bracket_str.chars().count() + 1;
@@ -702,15 +724,29 @@ layout {
     }
 
     fn render_detail_line(&self, project: &Project, is_selected: bool, cols: usize) -> Text {
-        let mut parts = String::from("   "); // 3-space indent to align under project name
+        let mut parts = String::from(" │ "); // left border to align under name line
 
         // Git branch
+        let branch_start = parts.chars().count(); // position after the " │ " prefix
         if let Some(ref branch) = project.metadata.git_branch {
             let display_branch = if branch == "HEAD" { "detached" } else { branch.as_str() };
-            parts.push_str(&format!(" {}", display_branch));
+            parts.push_str(display_branch);
+        }
+        let branch_end = parts.chars().count();
+
+        // Pills: render as key:value pairs (limit to first 3)
+        for (key, value) in project.metadata.pills.iter().take(3) {
+            parts.push_str(&format!(" {}:{}", key, value));
         }
 
-        // Future phases add pills, ports, progress here
+        // Progress bar: only render if there is room
+        if let Some(pct) = project.metadata.progress_pct {
+            let bar = render_progress_bar(pct, 7);
+            let progress_str = format!("  {} {}%", bar, pct);
+            if parts.chars().count() + progress_str.chars().count() < cols {
+                parts.push_str(&progress_str);
+            }
+        }
 
         let display_line: String = if parts.chars().count() > cols {
             parts.chars().take(cols.saturating_sub(1)).collect::<String>() + "..."
@@ -724,15 +760,37 @@ layout {
             text = text.selected();
         }
 
-        // Color branch text in blue for non-current sessions, green for current
+        // Color the left border │ (char index 1) based on agent/session state
         let is_current_session = matches!(&project.status, SessionStatus::Running { is_current: true, .. });
+        let needs_attention = self.attention_sessions.contains(&project.name);
+
+        let border_color = if needs_attention {
+            COLOR_RED
+        } else if is_current_session {
+            COLOR_GREEN
+        } else {
+            match &project.metadata.agent.state {
+                AgentState::Active => COLOR_GREEN,
+                AgentState::Waiting => COLOR_YELLOW,
+                AgentState::Idle => COLOR_GRAY,
+                AgentState::Unknown => match &project.status {
+                    SessionStatus::Running { .. } => COLOR_GREEN,
+                    SessionStatus::Exited => COLOR_YELLOW,
+                    SessionStatus::NotStarted => COLOR_GRAY,
+                },
+            }
+        };
+
         if is_current_session {
             // Current session: green across entire detail line (matches name line behavior)
             text = text.color_range(COLOR_GREEN, 0..display_line.chars().count());
-        } else if project.metadata.git_branch.is_some() {
-            // Non-current: blue for the branch portion (starting after the 3-space indent)
-            let content_start = 3; // "   " indent
-            text = text.color_range(COLOR_BLUE, content_start..display_line.chars().count());
+        } else {
+            // Color the │ border char (char index 1)
+            text = text.color_range(border_color, 1..2);
+            // Color branch text in blue for non-current sessions
+            if project.metadata.git_branch.is_some() && branch_end > branch_start {
+                text = text.color_range(COLOR_BLUE, branch_start..branch_end);
+            }
         }
 
         text
@@ -1193,7 +1251,11 @@ impl ZellijPlugin for State {
                     print_text_with_coordinates(text, 0, screen_y, Some(cols), None);
                 }
                 RenderLine::Separator => {
-                    // Blank line — Zellij clears pane before render(), so no output needed
+                    // Top rule for the next card
+                    let rule = format!(" ┌{}", "─".repeat(cols.saturating_sub(3)));
+                    let display: String = rule.chars().take(cols).collect();
+                    let text = Text::new(&display).color_all(COLOR_GRAY);
+                    print_text_with_coordinates(text, 0, screen_y, Some(cols), None);
                 }
             }
         }
