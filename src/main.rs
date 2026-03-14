@@ -558,18 +558,27 @@ layout {
             return;
         }
         let selected_proj = self.selected_project_index();
-        let selected_y = render_lines.iter().position(|line| {
-            match (line, selected_proj) {
-                (RenderLine::ProjectRow(idx), Some(sel)) => *idx == sel,
-                _ => false,
+
+        // Find the first and last render line belonging to the selected project
+        let mut first_y: Option<usize> = None;
+        let mut last_y: Option<usize> = None;
+        for (y, line) in render_lines.iter().enumerate() {
+            if line.project_index() == selected_proj && selected_proj.is_some() {
+                if first_y.is_none() {
+                    first_y = Some(y);
+                }
+                last_y = Some(y);
             }
-        });
-        if let Some(y) = selected_y {
-            if y < self.scroll_offset {
-                self.scroll_offset = y;
+        }
+
+        if let (Some(first), Some(last)) = (first_y, last_y) {
+            // Scroll up if card starts above viewport
+            if first < self.scroll_offset {
+                self.scroll_offset = first;
             }
-            if y >= self.scroll_offset + visible_rows {
-                self.scroll_offset = y - visible_rows + 1;
+            // Scroll down if card ends below viewport
+            if last >= self.scroll_offset + visible_rows {
+                self.scroll_offset = last.saturating_sub(visible_rows - 1);
             }
         }
     }
@@ -937,7 +946,7 @@ impl ZellijPlugin for State {
                         let render_idx = self.scroll_offset + (click_y - y_offset);
 
                         if render_idx < render_lines.len() {
-                            if let RenderLine::ProjectRow(project_idx) = render_lines[render_idx] {
+                            if let Some(project_idx) = render_lines[render_idx].project_index() {
                                 let filtered = self.filtered_indices();
                                 if let Some(fi) = filtered.iter().position(|&i| i == project_idx) {
                                     self.selected_index = fi;
