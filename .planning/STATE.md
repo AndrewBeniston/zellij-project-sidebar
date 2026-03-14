@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Rich Cards
-status: checkpoint
-stopped_at: 06-01-PLAN.md Task 3 (human-verify checkpoint)
-last_updated: "2026-03-14T15:28:03Z"
-last_activity: 2026-03-14 — Completed Phase 6 Plan 01 tasks 1-2, awaiting human verification
+status: completed
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-03-14T16:58:49.328Z"
+last_activity: 2026-03-14 — Completed Phase 7 Plan 01 (pipe protocol data model: AgentState, pills, progress, 5 pipe handlers)
 progress:
   total_phases: 8
-  completed_phases: 2
-  total_plans: 5
-  completed_plans: 3
-  percent: 50
+  completed_phases: 3
+  total_plans: 8
+  completed_plans: 4
+  percent: 60
 ---
 
 # Project State
@@ -21,28 +21,29 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** One-keypress project switching with always-visible session awareness
-**Current focus:** Phase 6 — Multi-Line Card Rendering
+**Current focus:** Phase 7 — Pipe Protocol / Pills + Progress
 
 ## Current Position
 
-Phase: 6 of 8 (Multi-Line Card Rendering)
-Plan: 1 of 1 (Checkpoint — awaiting human-verify)
-Status: Tasks 1-2 complete, Task 3 is human verification checkpoint
-Last activity: 2026-03-14 — Completed Phase 6 Plan 01 rendering refactor, awaiting verification
+Phase: 7 of 8 (Pipe Protocol — Pills + Progress) — In Progress
+Plan: 1 of 2 (Complete)
+Status: Phase 7 Plan 01 complete — data model and pipe ingestion layer done
+Last activity: 2026-03-14 — Completed Phase 7 Plan 01 (AgentState/AgentStatus, pills/progress fields, 5 pipe handlers)
 
 Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2 (v1.1)
-- Average duration: 2.5min
-- Total execution time: 5min
+- Total plans completed: 4 (v1.1)
+- Average duration: 3.3min
+- Total execution time: 10min
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
 | 05    | 01   | 3min     | 2     | 1     |
-| 06    | 01   | 2min     | 2     | 1     |
+| 06    | 01   | 2min     | 3     | 1     |
+| 07    | 01   | 5min     | 2     | 1     |
 
 ## Accumulated Context
 
@@ -63,6 +64,8 @@ Progress: [█████░░░░░] 50%
 - [P6]: Git branch moved from name line to dedicated detail line (render_detail_line)
 - [P6]: NotStarted projects remain single-line cards in browse mode
 - [P6]: project_index() pattern for variant-agnostic click/scroll handling
+- [Phase 07]: AgentState::Unknown as default — avoids false active/idle signals before first pipe message
+- [Phase 07]: Pipe protocol uses args dict (session, state, tool, key, value, pct) for all sidebar:: handlers
 
 ### Pending Todos
 
@@ -70,13 +73,13 @@ None yet.
 
 ### Blockers/Concerns
 
-- Pipe protocol format: `::` name encoding vs `args` dict -- decide during Phase 7 planning
+- ~~Pipe protocol format: `::` name encoding vs `args` dict~~ (RESOLVED in Phase 7 Plan 01: args dict used for sidebar::ai/pill/progress)
 - Port attribution: PID-to-session mapping impossible from WASM sandbox -- pipe-based is reliable, lsof is stretch goal
 - ~~Fixed vs variable card height: decide during Phase 6 planning~~ (RESOLVED: 2-line cards for Running/Exited, 1-line for NotStarted)
 - ~~RunCommands permission: must be requested unconditionally~~ (RESOLVED in Phase 5 Plan 01)
 
 ## Session Continuity
 
-Last session: 2026-03-14
-Stopped at: 06-01-PLAN.md Task 3 (checkpoint:human-verify)
+Last session: 2026-03-14T16:58:49.326Z
+Stopped at: Completed 07-01-PLAN.md
 Resume file: None

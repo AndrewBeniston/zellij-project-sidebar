@@ -143,5 +143,5 @@ Phases execute in numeric order: 5 -> 6 -> 7 -> 8
 | 4. Enrichment + Theme | v1.0 | -/- | Complete | 2026-03-14 |
 | 5. Data Model + Polling Infrastructure | v1.1 | 1/1 | Complete | 2026-03-14 |
 | 6. Multi-Line Card Rendering | v1.1 | 1/1 | Complete | 2026-03-14 |
-| 7. Pipe Protocol -- Pills + Progress | v1.1 | 0/2 | Not started | - |
+| 7. Pipe Protocol -- Pills + Progress | 1/2 | In Progress|  | - |
 | 8. Port Detection + Polish | v1.1 | 0/? | Not started | - |
