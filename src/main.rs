@@ -744,6 +744,15 @@ impl ZellijPlugin for State {
                     }
                     self.initial_load_complete = true;
                 }
+                // Auto-track current session when sidebar is not actively navigated
+                if !self.is_focused {
+                    let filtered = self.filtered_indices();
+                    if let Some(fi) = filtered.iter().position(|&i| {
+                        matches!(self.projects[i].status, SessionStatus::Running { is_current: true, .. })
+                    }) {
+                        self.selected_index = fi;
+                    }
+                }
                 true
             }
             Event::Mouse(mouse) => {
