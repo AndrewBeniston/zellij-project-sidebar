@@ -1,110 +1,110 @@
 # Requirements: Zellij Project Sidebar
 
-**Defined:** 2026-03-11
+**Defined:** 2026-03-14
 **Core Value:** One-keypress project switching with always-visible session awareness
 
-## v1 Requirements
+## v1.1 Requirements
 
-### Display
+Requirements for Rich Cards milestone. Each maps to roadmap phases.
 
-- [ ] **DISP-01**: Plugin renders a list of pinned project folders from KDL config
-- [ ] **DISP-02**: Each project shows live session status (running / exited / not started)
-- [ ] **DISP-03**: Current active session is visually highlighted
-- [ ] **DISP-04**: Running sessions show tab count (e.g. `help-self [3]`)
-- [ ] **DISP-05**: Active pane command displayed for current session (e.g. `claude` or `vim`)
-- [ ] **DISP-06**: Info verbosity configurable — minimal (name + status dot) through full (tabs + command)
+### Card Layout
 
-### Interaction
+- [ ] **CARD-01**: Each project renders as a multi-line card (name+status on line 1, metadata on subsequent lines)
+- [ ] **CARD-02**: Cards have visual separators between them
+- [ ] **CARD-03**: Mouse click maps correctly to multi-line cards (clicking any line of a card selects that project)
+- [ ] **CARD-04**: Scroll and keyboard navigation work correctly with variable-height cards
+- [ ] **CARD-05**: Selection auto-tracks current session when sidebar is unfocused
 
-- [ ] **INTR-01**: User can navigate project list with j/k keys
-- [ ] **INTR-02**: User can switch to a running session by pressing Enter
-- [ ] **INTR-03**: If no session exists for a folder, Enter creates one with cwd set to that folder
-- [ ] **INTR-04**: User can kill a session by pressing x on a running project
-- [ ] **INTR-05**: User can toggle sidebar visibility with a keybind (Cmd+P via pipe mechanism)
+### Data Pipeline
 
-### Layout
+- [x] **DATA-01**: Plugin polls for metadata (git branch, ports) on a timer interval
+- [x] **DATA-02**: run_command results are correctly routed via context tagging (type + project name)
+- [x] **DATA-03**: Polling only runs for projects with active sessions (not all discovered dirs)
+- [x] **DATA-04**: No loading flash — render gracefully before data arrives
 
-- [ ] **LAYT-01**: Plugin renders as a docked side panel (tiled pane, not floating)
-- [ ] **LAYT-02**: Sidebar has fixed width (configurable, default ~20 chars)
-- [ ] **LAYT-03**: Toggle hides/shows sidebar and reclaims/restores space
+### Git Integration
+
+- [x] **GIT-01**: Each project with an active session shows current git branch name
+- [x] **GIT-02**: Branch updates automatically on timer interval without user action
+
+### Status Pills
+
+- [ ] **PILL-01**: External tools can push key-value metadata via pipe messages
+- [ ] **PILL-02**: Pills display on the card below the project name
+- [ ] **PILL-03**: Pills are cleared when the source tool sends a clear message
+
+### Progress Bar
+
+- [ ] **PROG-01**: External tools can push a progress percentage via pipe messages
+- [ ] **PROG-02**: Progress renders as a character-cell bar on the card
+- [ ] **PROG-03**: Progress is cleared when complete or explicitly cleared
+
+### Port Detection
+
+- [ ] **PORT-01**: Plugin auto-detects listening ports per project via lsof on timer
+- [ ] **PORT-02**: External tools can also report ports via pipe messages
+- [ ] **PORT-03**: Detected ports display on the project card
+
+## v1.0 Requirements (Complete)
 
 ### Infrastructure
 
 - [x] **INFR-01**: Plugin compiles to wasm32-wasip1 and loads in Zellij 0.43.1
-- [x] **INFR-02**: Plugin requests and handles permissions correctly (first-launch UX)
-- [x] **INFR-03**: Plugin subscribes to SessionUpdate events for live data (no polling)
-- [ ] **INFR-04**: Sidebar is unselectable by default — becomes selectable only during active interaction
-- [ ] **INFR-05**: Pipe-based toggle mechanism works from any context (unfocused)
+- [x] **INFR-02**: Plugin requests and handles permissions correctly
+- [x] **INFR-03**: Plugin subscribes to SessionUpdate events for live data
 
-### Theme
+### Display & Interaction
 
-- [ ] **THEM-01**: Colours match Catppuccin Frappe via Zellij's color_range API
-- [ ] **THEM-02**: Status indicators use semantic colours (green = running, dim = stopped, yellow = exited)
-
-## v2 Requirements
-
-### Enhanced Display
-
-- **DISP-07**: Cross-session active pane command display (pending API verification)
-- **DISP-08**: Per-project custom layout on session creation
-
-### Interaction
-
-- **INTR-06**: Mouse click to switch sessions
-- **INTR-07**: Rename session in-place
-- **INTR-08**: Drag to reorder pinned projects
-
-### Theme
-
-- **THEM-03**: Themeable via Zellij theme system (not hardcoded to Frappe)
-- **THEM-04**: Custom icons/glyphs for project types
-
-### Configuration
-
-- **CONF-01**: Auto-scan directory mode (scan + pin favourites)
-- **CONF-02**: Per-project layout assignment in config
+- [x] **DISP-01**: Session-based default view (running/exited only)
+- [x] **DISP-02**: Browse mode with fuzzy search
+- [x] **DISP-03**: Current session highlighted green
+- [x] **DISP-04**: Tab count and active command display
+- [x] **INTR-01**: Keyboard navigation (Up/Down, Enter, Delete, Esc)
+- [x] **INTR-02**: Mouse click and scroll support
+- [x] **INTR-03**: Toggle focus (Cmd+O), new tab with sidebar (Cmd+T)
+- [x] **INTR-04**: Attention system via pipe messages
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Fuzzy search / directory scanning | Sessionizer already does this — this plugin is for pinned projects |
+| Rename session | Low value, can do via CLI |
 | Tab/pane management within sessions | Choose-tree handles this |
-| Session resurrection controls | Zellij handles this natively |
-| Multi-plugin communication | No established pattern, adds complexity |
-| Floating popup mode | Contradicts core value — sidebar is the differentiator |
+| Multi-theme support | Hardcode Catppuccin Frappe, themeable later |
+| Floating popup mode | Contradicts core value |
+| Git dirty/clean indicator | Keep simple for v1.1, branch name only |
+| Expandable/collapsible cards | Over-engineering for v1.1, fixed multi-line is sufficient |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFR-01 | Phase 1 | Complete |
-| INFR-02 | Phase 1 | Complete |
-| INFR-03 | Phase 1 | Complete |
-| DISP-01 | Phase 2 | Pending |
-| DISP-02 | Phase 2 | Pending |
-| DISP-03 | Phase 2 | Pending |
-| INTR-01 | Phase 2 | Pending |
-| INTR-02 | Phase 2 | Pending |
-| INTR-03 | Phase 2 | Pending |
-| INTR-04 | Phase 2 | Pending |
-| INFR-04 | Phase 2 | Pending |
-| LAYT-01 | Phase 3 | Pending |
-| LAYT-02 | Phase 3 | Pending |
-| LAYT-03 | Phase 3 | Pending |
-| INTR-05 | Phase 3 | Pending |
-| INFR-05 | Phase 3 | Pending |
-| DISP-04 | Phase 4 | Pending |
-| DISP-05 | Phase 4 | Pending |
-| DISP-06 | Phase 4 | Pending |
-| THEM-01 | Phase 4 | Pending |
-| THEM-02 | Phase 4 | Pending |
+| CARD-01 | Phase 6 | Pending |
+| CARD-02 | Phase 6 | Pending |
+| CARD-03 | Phase 6 | Pending |
+| CARD-04 | Phase 6 | Pending |
+| CARD-05 | Phase 6 | Pending |
+| DATA-01 | Phase 5 | Complete |
+| DATA-02 | Phase 5 | Complete |
+| DATA-03 | Phase 5 | Complete |
+| DATA-04 | Phase 5 | Complete |
+| GIT-01 | Phase 5 | Complete |
+| GIT-02 | Phase 5 | Complete |
+| PILL-01 | Phase 7 | Pending |
+| PILL-02 | Phase 7 | Pending |
+| PILL-03 | Phase 7 | Pending |
+| PROG-01 | Phase 7 | Pending |
+| PROG-02 | Phase 7 | Pending |
+| PROG-03 | Phase 7 | Pending |
+| PORT-01 | Phase 8 | Pending |
+| PORT-02 | Phase 8 | Pending |
+| PORT-03 | Phase 8 | Pending |
 
 **Coverage:**
-- v1 requirements: 21 total
-- Mapped to phases: 21
+- v1.1 requirements: 20 total
+- Mapped to phases: 20
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-03-11*
-*Last updated: 2026-03-11 after roadmap creation (4-phase structure)*
+*Requirements defined: 2026-03-14*
+*Last updated: 2026-03-14 after roadmap creation*

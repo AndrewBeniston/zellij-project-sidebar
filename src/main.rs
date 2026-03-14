@@ -70,7 +70,18 @@ struct Project {
 
 enum RenderLine {
     Header(String),
-    ProjectRow(usize), // index into self.projects
+    ProjectRow(usize),    // index into self.projects (name line)
+    ProjectDetail(usize), // index into self.projects (detail line: git branch, future metadata)
+    Separator,            // blank line between cards
+}
+
+impl RenderLine {
+    fn project_index(&self) -> Option<usize> {
+        match self {
+            RenderLine::ProjectRow(idx) | RenderLine::ProjectDetail(idx) => Some(*idx),
+            RenderLine::Header(_) | RenderLine::Separator => None,
+        }
+    }
 }
 
 struct State {
@@ -524,8 +535,19 @@ layout {
             lines.push(RenderLine::Header("All projects".to_string()));
         }
 
-        for &i in &filtered {
+        for (fi, &i) in filtered.iter().enumerate() {
+            let project = &self.projects[i];
             lines.push(RenderLine::ProjectRow(i));
+
+            // Detail line for projects with sessions (Running or Exited) — not NotStarted
+            if !matches!(project.status, SessionStatus::NotStarted) {
+                lines.push(RenderLine::ProjectDetail(i));
+            }
+
+            // Separator between cards (not after last)
+            if fi < filtered.len() - 1 {
+                lines.push(RenderLine::Separator);
+            }
         }
 
         lines
@@ -552,7 +574,7 @@ layout {
         }
     }
 
-    fn render_project_line(&self, project: &Project, is_selected: bool, cols: usize) -> Text {
+    fn render_project_name_line(&self, project: &Project, is_selected: bool, cols: usize) -> Text {
         let needs_attention = self.attention_sessions.contains(&project.name);
         let status_dot = if needs_attention {
             "◆" // diamond for attention
@@ -581,11 +603,7 @@ layout {
                 {
                     parts.push_str(&format!(" {}", cmd));
                 }
-                // Show git branch for running sessions
-                if let Some(ref branch) = project.metadata.git_branch {
-                    let display_branch = if branch == "HEAD" { "detached" } else { branch.as_str() };
-                    parts.push_str(&format!("  {}", display_branch));
-                }
+                // Git branch is now rendered on the detail line — do NOT add it here
                 parts
             }
         };
@@ -647,19 +665,43 @@ layout {
                     }
                 }
             }
+        }
 
-            // Color git branch text in blue (dim) for non-current sessions
-            if let Some(ref branch) = project.metadata.git_branch {
-                let display_branch = if branch == "HEAD" { "detached" } else { branch.as_str() };
-                let branch_display = format!("  {}", display_branch);
-                let branch_char_len = branch_display.chars().count();
-                let line_len = display_line.chars().count();
-                // Branch is at the end of the line
-                if line_len >= branch_char_len {
-                    let branch_start = line_len - branch_char_len;
-                    text = text.color_range(COLOR_BLUE, branch_start..line_len);
-                }
-            }
+        text
+    }
+
+    fn render_detail_line(&self, project: &Project, is_selected: bool, cols: usize) -> Text {
+        let mut parts = String::from("   "); // 3-space indent to align under project name
+
+        // Git branch
+        if let Some(ref branch) = project.metadata.git_branch {
+            let display_branch = if branch == "HEAD" { "detached" } else { branch.as_str() };
+            parts.push_str(&format!(" {}", display_branch));
+        }
+
+        // Future phases add pills, ports, progress here
+
+        let display_line: String = if parts.chars().count() > cols {
+            parts.chars().take(cols.saturating_sub(1)).collect::<String>() + "..."
+        } else {
+            parts
+        };
+
+        let mut text = Text::new(&display_line);
+
+        if is_selected {
+            text = text.selected();
+        }
+
+        // Color branch text in blue for non-current sessions, green for current
+        let is_current_session = matches!(&project.status, SessionStatus::Running { is_current: true, .. });
+        if is_current_session {
+            // Current session: green across entire detail line (matches name line behavior)
+            text = text.color_range(COLOR_GREEN, 0..display_line.chars().count());
+        } else if project.metadata.git_branch.is_some() {
+            // Non-current: blue for the branch portion (starting after the 3-space indent)
+            let content_start = 3; // "   " indent
+            text = text.color_range(COLOR_BLUE, content_start..display_line.chars().count());
         }
 
         text
@@ -1110,8 +1152,17 @@ impl ZellijPlugin for State {
                 RenderLine::ProjectRow(project_idx) => {
                     let project = &self.projects[*project_idx];
                     let is_selected = self.selected_project_index() == Some(*project_idx);
-                    let text = self.render_project_line(project, is_selected, cols);
+                    let text = self.render_project_name_line(project, is_selected, cols);
                     print_text_with_coordinates(text, 0, screen_y, Some(cols), None);
+                }
+                RenderLine::ProjectDetail(project_idx) => {
+                    let project = &self.projects[*project_idx];
+                    let is_selected = self.selected_project_index() == Some(*project_idx);
+                    let text = self.render_detail_line(project, is_selected, cols);
+                    print_text_with_coordinates(text, 0, screen_y, Some(cols), None);
+                }
+                RenderLine::Separator => {
+                    // Blank line — Zellij clears pane before render(), so no output needed
                 }
             }
         }

@@ -1,68 +1,64 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: planning
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-03-11T21:02:21.381Z"
-last_activity: 2026-03-11 -- Completed 01-01-PLAN.md (Rust WASM plugin scaffold)
+milestone: v1.1
+milestone_name: Rich Cards
+status: completed
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-03-14T03:25:02.880Z"
+last_activity: 2026-03-14 — Completed Phase 5 Plan 01 (data model, polling, git branch display)
 progress:
-  total_phases: 4
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 100
+  total_phases: 8
+  completed_phases: 2
+  total_plans: 5
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-11)
+See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** One-keypress project switching with always-visible session awareness
-**Current focus:** Phase 1: Scaffold + Lifecycle (complete) -- ready for Phase 2
+**Current focus:** Phase 5 — Data Model + Polling Infrastructure
 
 ## Current Position
 
-Phase: 1 of 4 (Scaffold + Lifecycle) -- COMPLETE
-Plan: 1 of 1 in current phase (all plans done)
-Status: Phase 1 complete, ready for Phase 2 planning
-Last activity: 2026-03-11 -- Completed 01-01-PLAN.md (Rust WASM plugin scaffold)
+Phase: 5 of 8 (Data Model + Polling Infrastructure)
+Plan: 1 of 1 (Complete)
+Status: Phase 5 complete
+Last activity: 2026-03-14 — Completed Phase 5 Plan 01 (data model, polling, git branch display)
 
-Progress: [██████████] 100%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 5min
-- Total execution time: 5min
+- Total plans completed: 1 (v1.1)
+- Average duration: 3min
+- Total execution time: 3min
 
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| Phase 01 P01 | 5min | 2 tasks | 6 files |
-
-**Recent Trend:**
-- Last 5 plans: 5min
-- Trend: baseline
-
-*Updated after each plan completion*
+| Phase | Plan | Duration | Tasks | Files |
+|-------|------|----------|-------|-------|
+| 05    | 01   | 3min     | 2     | 1     |
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- [Roadmap]: 4-phase coarse structure -- scaffold, display+interaction, layout+toggle, enrichment+theme
-- [Research]: wasm32-wasip1 target (not wasm32-wasi), pipe() for toggle (not Key events), SessionUpdate for live data (not polling)
-- [Phase 01]: Manual project setup over cargo-generate template (outdated zellij-tile 0.41.1)
-- [Phase 01]: All permissions requested upfront in load() (dialog cached by plugin URL)
-- [Phase 01]: Edition 2021 over 2024 (battle-tested for wasm32-wasip1, no added value)
+- [v1.0]: Session-based over pin-based default view
+- [v1.0]: Browse mode replaces manual curation
+- [v1.0]: Pipe-based attention system
+- [v1.0]: Discovery mode (scan_dir) as primary
+- [v1.1]: Multi-line card layout (CMUX-inspired)
+- [v1.1]: run_command for git/port detection (zero new crate deps)
+- [v1.1]: Status pills + progress bar via pipe messages
+- [v1.1]: Data pipeline before rendering refactor (prove polling before investing in UI)
+- [v1.1]: Multi-line card refactor is atomic (mouse, scroll, selection all break together)
+- [P5]: RunCommands permission and Timer/RunCommandResult events now unconditional
+- [P5]: Backpressure via pending_commands counter -- timer skips if previous cycle pending
+- [P5]: is_git_repo field prevents re-polling non-git directories every cycle
 
 ### Pending Todos
 
@@ -70,12 +66,13 @@ None yet.
 
 ### Blockers/Concerns
 
-- Cross-session PaneInfo availability unverified -- active command display (DISP-05) may only work for current session. Needs live testing in Phase 4.
-- hide_self() behaviour in tiled layout unverified -- may need close_self()+reopen instead. Needs live testing in Phase 3.
-- Tilde expansion in WASM context unverified -- config paths with `~/` may need manual expansion. Needs verification in Phase 2.
+- Pipe protocol format: `::` name encoding vs `args` dict -- decide during Phase 7 planning
+- Port attribution: PID-to-session mapping impossible from WASM sandbox -- pipe-based is reliable, lsof is stretch goal
+- Fixed vs variable card height: decide during Phase 6 planning (hybrid approach likely optimal)
+- ~~RunCommands permission: must be requested unconditionally~~ (RESOLVED in Phase 5 Plan 01)
 
 ## Session Continuity
 
-Last session: 2026-03-11T21:02:21.379Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-03-14
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None

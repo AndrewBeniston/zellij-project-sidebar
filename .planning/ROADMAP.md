@@ -84,7 +84,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 05-01-PLAN.md -- Data model, timer-driven polling, git branch detection, and inline branch display
+- [x] 05-01-PLAN.md -- Data model, timer-driven polling, git branch detection, and inline branch display
 
 ### Phase 6: Multi-Line Card Rendering
 **Goal**: Each project renders as a multi-line card showing name, status, and metadata, with mouse clicks, scroll, and keyboard all working correctly on variable-height cards
@@ -96,11 +96,10 @@ Plans:
   3. Scrolling and keyboard navigation (Up/Down/j/k) move between projects correctly regardless of how many screen rows each card occupies
   4. When the sidebar is unfocused, the selection automatically tracks whichever session the user is currently working in
   5. All existing v1.0 functionality (switch, create, kill, browse mode, attention badges) continues to work after the card refactor
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 06-01: TBD
-- [ ] 06-02: TBD
+- [ ] 06-01-PLAN.md -- Atomic card refactor: RenderLine variants, multi-line rendering, mouse/scroll/selection updates
 
 ### Phase 7: Pipe Protocol -- Pills + Progress
 **Goal**: External tools can push arbitrary metadata (key-value pills and progress percentages) via pipe messages, and these render on the corresponding project cards
@@ -141,7 +140,7 @@ Phases execute in numeric order: 5 -> 6 -> 7 -> 8
 | 2. Display + Interaction | v1.0 | 3/3 | Complete | 2026-03-14 |
 | 3. Sidebar Layout + Toggle | v1.0 | -/- | Complete | 2026-03-14 |
 | 4. Enrichment + Theme | v1.0 | -/- | Complete | 2026-03-14 |
-| 5. Data Model + Polling Infrastructure | v1.1 | 0/1 | Not started | - |
-| 6. Multi-Line Card Rendering | v1.1 | 0/? | Not started | - |
+| 5. Data Model + Polling Infrastructure | v1.1 | 1/1 | Complete | 2026-03-14 |
+| 6. Multi-Line Card Rendering | v1.1 | 0/1 | Not started | - |
 | 7. Pipe Protocol -- Pills + Progress | v1.1 | 0/? | Not started | - |
 | 8. Port Detection + Polish | v1.1 | 0/? | Not started | - |
