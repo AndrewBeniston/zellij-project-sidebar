@@ -1252,6 +1252,83 @@ impl ZellijPlugin for State {
                 eprintln!("Sidebar activated via pipe (legacy focus_sidebar)");
                 true
             }
+            "sidebar::ai" => {
+                if let Some(session) = pipe_message.args.get("session").cloned() {
+                    let meta = self.cached_metadata.entry(session.clone()).or_default();
+                    meta.agent.state = match pipe_message.args.get("state").map(|s| s.as_str()) {
+                        Some("active") => AgentState::Active,
+                        Some("idle") => AgentState::Idle,
+                        Some("waiting") => AgentState::Waiting,
+                        _ => AgentState::Unknown,
+                    };
+                    if let Some(tool) = pipe_message.args.get("tool") {
+                        meta.agent.last_tool = Some(tool.clone());
+                    }
+                    eprintln!("AI state updated: {:?} for {}", pipe_message.args.get("state"), session);
+                    self.apply_cached_metadata();
+                    true
+                } else {
+                    false
+                }
+            }
+            "sidebar::pill" => {
+                let session = pipe_message.args.get("session").cloned();
+                let key = pipe_message.args.get("key").cloned();
+                let value = pipe_message.args.get("value").cloned();
+                if let (Some(session), Some(key), Some(value)) = (session, key, value) {
+                    let meta = self.cached_metadata.entry(session.clone()).or_default();
+                    meta.pills.insert(key.clone(), value.clone());
+                    eprintln!("Pill set: {}={} for {}", key, value, session);
+                    self.apply_cached_metadata();
+                    true
+                } else {
+                    false
+                }
+            }
+            "sidebar::pill-clear" => {
+                if let Some(session) = pipe_message.args.get("session").cloned() {
+                    let meta = self.cached_metadata.entry(session.clone()).or_default();
+                    if let Some(key) = pipe_message.args.get("key") {
+                        meta.pills.remove(key);
+                        eprintln!("Pill cleared: {} for {}", key, session);
+                    } else {
+                        meta.pills.clear();
+                        eprintln!("All pills cleared for {}", session);
+                    }
+                    self.apply_cached_metadata();
+                    true
+                } else {
+                    false
+                }
+            }
+            "sidebar::progress" => {
+                let session = pipe_message.args.get("session").cloned();
+                let pct_str = pipe_message.args.get("pct").cloned();
+                if let (Some(session), Some(pct_str)) = (session, pct_str) {
+                    if let Ok(pct) = pct_str.parse::<u8>() {
+                        let meta = self.cached_metadata.entry(session.clone()).or_default();
+                        meta.progress_pct = if pct == 0 { None } else { Some(pct.min(100)) };
+                        eprintln!("Progress set: {}% for {}", pct, session);
+                        self.apply_cached_metadata();
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            "sidebar::progress-clear" => {
+                if let Some(session) = pipe_message.args.get("session").cloned() {
+                    let meta = self.cached_metadata.entry(session.clone()).or_default();
+                    meta.progress_pct = None;
+                    eprintln!("Progress cleared for {}", session);
+                    self.apply_cached_metadata();
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         }
     }
