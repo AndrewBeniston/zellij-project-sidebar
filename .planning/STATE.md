@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Rich Cards
 status: completed
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-03-14T16:58:49.328Z"
-last_activity: 2026-03-14 — Completed Phase 7 Plan 01 (pipe protocol data model: AgentState, pills, progress, 5 pipe handlers)
+stopped_at: "Checkpoint: 07-02 Task 3 human-verify (pills/progress/AI dot live verification)"
+last_updated: "2026-03-14T17:04:23.422Z"
+last_activity: 2026-03-14 — Completed Phase 7 Plan 01 (AgentState/AgentStatus, pills/progress fields, 5 pipe handlers)
 progress:
   total_phases: 8
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 8
-  completed_plans: 4
-  percent: 60
+  completed_plans: 5
+  percent: 50
 ---
 
 # Project State
@@ -44,6 +44,7 @@ Progress: [█████░░░░░] 50%
 | 05    | 01   | 3min     | 2     | 1     |
 | 06    | 01   | 2min     | 3     | 1     |
 | 07    | 01   | 5min     | 2     | 1     |
+| Phase 07 P02 | 3min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ Progress: [█████░░░░░] 50%
 - [P6]: project_index() pattern for variant-agnostic click/scroll handling
 - [Phase 07]: AgentState::Unknown as default — avoids false active/idle signals before first pipe message
 - [Phase 07]: Pipe protocol uses args dict (session, state, tool, key, value, pct) for all sidebar:: handlers
+- [Phase 07]: Left border │ and dot share border_dot_color for consistent AI state visual signal
+- [Phase 07]: Separator renders as top rule ┌─── (between-card); first card has no top rule to avoid click mapping changes
 
 ### Pending Todos
 
@@ -80,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T16:58:49.326Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-03-14T17:04:23.420Z
+Stopped at: Checkpoint: 07-02 Task 3 human-verify (pills/progress/AI dot live verification)
 Resume file: None

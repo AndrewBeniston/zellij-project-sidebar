@@ -27,7 +27,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 5: Data Model + Polling Infrastructure** - ProjectMetadata struct, timer-driven polling loop, git branch detection via run_command
 - [x] **Phase 6: Multi-Line Card Rendering** - Atomic refactor of rendering, mouse, scroll, and selection to support multi-line project cards
-- [ ] **Phase 7: Pipe Protocol -- Pills + Progress** - External metadata injection via pipe messages with card rendering for pills and progress bars
+- [x] **Phase 7: Pipe Protocol -- Pills + Progress** - External metadata injection via pipe messages with card rendering for pills and progress bars (completed 2026-03-14)
 - [ ] **Phase 8: Port Detection + Polish** - Listening port display via auto-detection (lsof) and pipe-based reporting
 
 ## Phase Details
@@ -143,5 +143,5 @@ Phases execute in numeric order: 5 -> 6 -> 7 -> 8
 | 4. Enrichment + Theme | v1.0 | -/- | Complete | 2026-03-14 |
 | 5. Data Model + Polling Infrastructure | v1.1 | 1/1 | Complete | 2026-03-14 |
 | 6. Multi-Line Card Rendering | v1.1 | 1/1 | Complete | 2026-03-14 |
-| 7. Pipe Protocol -- Pills + Progress | 1/2 | In Progress|  | - |
+| 7. Pipe Protocol -- Pills + Progress | 2/2 | Complete   | 2026-03-14 | - |
 | 8. Port Detection + Polish | v1.1 | 0/? | Not started | - |

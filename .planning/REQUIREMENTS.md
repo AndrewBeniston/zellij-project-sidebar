@@ -30,13 +30,13 @@ Requirements for Rich Cards milestone. Each maps to roadmap phases.
 ### Status Pills
 
 - [x] **PILL-01**: External tools can push key-value metadata via pipe messages
-- [ ] **PILL-02**: Pills display on the card below the project name
+- [x] **PILL-02**: Pills display on the card below the project name
 - [x] **PILL-03**: Pills are cleared when the source tool sends a clear message
 
 ### Progress Bar
 
 - [x] **PROG-01**: External tools can push a progress percentage via pipe messages
-- [ ] **PROG-02**: Progress renders as a character-cell bar on the card
+- [x] **PROG-02**: Progress renders as a character-cell bar on the card
 - [x] **PROG-03**: Progress is cleared when complete or explicitly cleared
 
 ### Port Detection
@@ -91,10 +91,10 @@ Requirements for Rich Cards milestone. Each maps to roadmap phases.
 | GIT-01 | Phase 5 | Complete |
 | GIT-02 | Phase 5 | Complete |
 | PILL-01 | Phase 7 | Complete |
-| PILL-02 | Phase 7 | Pending |
+| PILL-02 | Phase 7 | Complete |
 | PILL-03 | Phase 7 | Complete |
 | PROG-01 | Phase 7 | Complete |
-| PROG-02 | Phase 7 | Pending |
+| PROG-02 | Phase 7 | Complete |
 | PROG-03 | Phase 7 | Complete |
 | PORT-01 | Phase 8 | Pending |
 | PORT-02 | Phase 8 | Pending |
