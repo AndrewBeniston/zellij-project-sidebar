@@ -704,8 +704,22 @@ impl ZellijPlugin for State {
                 if self.use_discovery {
                     self.update_cached_statuses(&sessions, &resurrectable);
                     self.has_session_data = true;
-                    self.apply_cached_statuses();
                     if self.scan_complete {
+                        self.apply_cached_statuses();
+                        self.initial_load_complete = true;
+                    } else {
+                        // Show live sessions immediately while scan runs in background.
+                        // Default view only shows Running/Exited, which we have from SessionUpdate.
+                        self.projects = self.cached_statuses.iter()
+                            .filter(|(_, status)| !matches!(status, SessionStatus::NotStarted))
+                            .map(|(name, status)| Project {
+                                name: name.clone(),
+                                path: String::new(),
+                                status: status.clone(),
+                            })
+                            .collect();
+                        self.projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                        self.clamp_selection();
                         self.initial_load_complete = true;
                     }
                 } else {
