@@ -23,6 +23,8 @@ const COLOR_GRAY: usize = 7;
 
 const CMD_KEY: &str = "cmd";
 const CMD_SCAN_DIR: &str = "scan_dir";
+const CMD_GIT_BRANCH: &str = "git_branch";
+const PROJECT_KEY: &str = "project";
 
 // --- Verbosity ---
 
@@ -51,11 +53,19 @@ enum SessionStatus {
     NotStarted,
 }
 
+#[derive(Clone, Default)]
+struct ProjectMetadata {
+    git_branch: Option<String>,
+    is_git_repo: Option<bool>, // None = unknown, Some(false) = not git, Some(true) = is git
+    // Future phases add: listening_ports, pills, progress
+}
+
 #[derive(Clone)]
 struct Project {
     name: String,
     path: String,
     status: SessionStatus,
+    metadata: ProjectMetadata,
 }
 
 enum RenderLine {
@@ -95,6 +105,11 @@ struct State {
 
     // Cached session statuses
     cached_statuses: BTreeMap<String, SessionStatus>,
+
+    // Metadata polling
+    cached_metadata: BTreeMap<String, ProjectMetadata>,
+    pending_commands: usize,
+    poll_tick: usize,
 }
 
 impl Default for State {
@@ -119,6 +134,9 @@ impl Default for State {
             is_primary: true,
             attention_sessions: BTreeSet::new(),
             cached_statuses: BTreeMap::new(),
+            cached_metadata: BTreeMap::new(),
+            pending_commands: 0,
+            poll_tick: 0,
         }
     }
 }
@@ -360,10 +378,13 @@ layout {
                     .get(name)
                     .cloned()
                     .unwrap_or(SessionStatus::NotStarted);
+                let metadata = self.cached_metadata.get(name).cloned()
+                    .unwrap_or_default();
                 Project {
                     name: name.clone(),
                     path: path.clone(),
                     status,
+                    metadata,
                 }
             })
             .collect();
@@ -420,6 +441,70 @@ layout {
                 .cloned()
                 .unwrap_or(SessionStatus::NotStarted);
         }
+    }
+
+    fn poll_git_branches(&mut self) {
+        for project in &self.projects {
+            if !matches!(project.status, SessionStatus::Running { .. }) {
+                continue;
+            }
+            if project.path.is_empty() {
+                continue;
+            }
+            // Skip projects we know are not git repos (until session restarts)
+            if project.metadata.is_git_repo == Some(false) {
+                continue;
+            }
+            let mut ctx = BTreeMap::new();
+            ctx.insert(CMD_KEY.to_string(), CMD_GIT_BRANCH.to_string());
+            ctx.insert(PROJECT_KEY.to_string(), project.name.clone());
+            run_command_with_env_variables_and_cwd(
+                &["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                BTreeMap::new(),
+                PathBuf::from(&project.path),
+                ctx,
+            );
+            self.pending_commands += 1;
+        }
+        if self.pending_commands == 0 {
+            // No running projects to poll, re-arm timer immediately
+            set_timeout(10.0);
+        }
+    }
+
+    fn apply_cached_metadata(&mut self) {
+        for project in &mut self.projects {
+            if let Some(meta) = self.cached_metadata.get(&project.name) {
+                project.metadata = meta.clone();
+            }
+        }
+    }
+
+    fn handle_git_branch_result(
+        &mut self,
+        exit_code: Option<i32>,
+        stdout: &[u8],
+        context: &BTreeMap<String, String>,
+    ) -> bool {
+        if let Some(project_name) = context.get(PROJECT_KEY) {
+            let meta = self.cached_metadata.entry(project_name.clone()).or_default();
+            if exit_code == Some(0) {
+                let branch = String::from_utf8_lossy(stdout).trim().to_string();
+                meta.is_git_repo = Some(true);
+                let changed = meta.git_branch.as_ref() != Some(&branch);
+                meta.git_branch = Some(branch);
+                if changed {
+                    self.apply_cached_metadata();
+                }
+                return changed;
+            } else {
+                // Non-zero exit = not a git repo (or git not installed)
+                meta.is_git_repo = Some(false);
+                meta.git_branch = None;
+                return false;
+            }
+        }
+        false
     }
 
     fn clamp_selection(&mut self) {
@@ -606,6 +691,7 @@ impl ZellijPlugin for State {
                     name,
                     path: path_str.clone(),
                     status: SessionStatus::NotStarted,
+                    metadata: ProjectMetadata::default(),
                 });
                 i += 1;
             }
@@ -623,25 +709,22 @@ impl ZellijPlugin for State {
             eprintln!("Legacy mode: loaded {} projects", self.projects.len());
         }
 
-        let mut permissions = vec![
+        let permissions = vec![
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
             PermissionType::Reconfigure,
+            PermissionType::RunCommands, // Always needed for git polling
         ];
-        if self.use_discovery {
-            permissions.push(PermissionType::RunCommands);
-        }
         request_permission(&permissions);
 
-        let mut events = vec![
+        let events = vec![
             EventType::SessionUpdate,
             EventType::PermissionRequestResult,
             EventType::Key,
             EventType::Mouse,
+            EventType::Timer,            // Needed for metadata polling
+            EventType::RunCommandResult, // Needed for git polling + discovery scan
         ];
-        if self.use_discovery {
-            events.push(EventType::RunCommandResult);
-        }
         subscribe(&events);
 
         // Ensure pane is focusable so user can accept the permissions dialog
@@ -661,7 +744,9 @@ impl ZellijPlugin for State {
                 if self.use_discovery {
                     self.trigger_scan();
                 }
-                eprintln!("Permissions granted, sidebar set to unselectable");
+                // Start polling timer (first poll after 2 seconds)
+                set_timeout(2.0);
+                eprintln!("Permissions granted, sidebar set to unselectable, polling timer started");
                 true
             }
             Event::PermissionRequestResult(PermissionStatus::Denied) => {
@@ -697,6 +782,18 @@ impl ZellijPlugin for State {
                         self.rebuild_projects();
                         true
                     }
+                    Some(CMD_GIT_BRANCH) => {
+                        let changed = self.handle_git_branch_result(exit_code, &stdout, &context);
+                        if self.pending_commands > 0 {
+                            self.pending_commands -= 1;
+                        }
+                        // Re-arm timer when all results are in
+                        if self.pending_commands == 0 {
+                            eprintln!("All git commands complete, re-arming timer");
+                            set_timeout(10.0);
+                        }
+                        changed
+                    }
                     _ => false,
                 }
             }
@@ -704,8 +801,17 @@ impl ZellijPlugin for State {
                 if self.use_discovery {
                     self.update_cached_statuses(&sessions, &resurrectable);
                     self.has_session_data = true;
+
+                    // Clear cached metadata for sessions that are no longer running
+                    let running_names: BTreeSet<String> = self.cached_statuses.iter()
+                        .filter(|(_, s)| matches!(s, SessionStatus::Running { .. }))
+                        .map(|(name, _)| name.clone())
+                        .collect();
+                    self.cached_metadata.retain(|name, _| running_names.contains(name));
+
                     if self.scan_complete {
                         self.apply_cached_statuses();
+                        self.apply_cached_metadata();
                         self.initial_load_complete = true;
                     } else {
                         // Show live sessions immediately while scan runs in background.
@@ -716,6 +822,7 @@ impl ZellijPlugin for State {
                                 name: name.clone(),
                                 path: String::new(),
                                 status: status.clone(),
+                                metadata: ProjectMetadata::default(),
                             })
                             .collect();
                         self.projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -875,6 +982,17 @@ impl ZellijPlugin for State {
 
                 _ => false,
             },
+            Event::Timer(_elapsed) => {
+                if self.pending_commands == 0 {
+                    self.poll_tick += 1;
+                    self.poll_git_branches();
+                    eprintln!("Poll tick {} -- dispatched git commands (pending: {})", self.poll_tick, self.pending_commands);
+                } else {
+                    // Commands still pending from last cycle, skip this tick
+                    eprintln!("Poll tick skipped -- {} commands still pending", self.pending_commands);
+                }
+                false // don't re-render on timer, wait for results
+            }
             _ => false,
         }
     }
