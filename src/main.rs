@@ -3,23 +3,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
-// --- Catppuccin Frappe Palette ---
-// Mapped to Zellij color_range index levels:
-//   0 = green  (Catppuccin Frappe: #a6d189)
-//   1 = cyan   (Catppuccin Frappe: #99d1db)  — unused currently
-//   2 = red    (Catppuccin Frappe: #e78284)
-//   3 = yellow (Catppuccin Frappe: #e5c890)
-//   4 = blue   (Catppuccin Frappe: #8caaee)
-//   5 = magenta(Catppuccin Frappe: #f4b8e4)  — unused currently
-//   6 = orange (Catppuccin Frappe: #ef9f76)  — unused currently
-//   7 = gray   (Catppuccin Frappe: #737994)  — for dim/stopped
+// --- Zellij Emphasis Colors ---
+// color_range only supports indices 0-3 (four emphasis levels)
+// Actual colors depend on the user's Zellij theme
+//   0 = emphasis_0 (typically green)
+//   1 = emphasis_1 (typically cyan/blue)
+//   2 = emphasis_2 (typically red)
+//   3 = emphasis_3 (typically yellow/orange)
 
 const COLOR_GREEN: usize = 0;
-#[allow(dead_code)]
+const COLOR_CYAN: usize = 1;
 const COLOR_RED: usize = 2;
 const COLOR_YELLOW: usize = 3;
-const COLOR_BLUE: usize = 4;
-const COLOR_GRAY: usize = 7;
 
 const CMD_KEY: &str = "cmd";
 const CMD_SCAN_DIR: &str = "scan_dir";
@@ -53,7 +48,7 @@ enum SessionStatus {
     NotStarted,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum AgentState {
     Active,
     Idle,
@@ -94,14 +89,16 @@ enum RenderLine {
     Header(String),
     ProjectRow(usize),    // index into self.projects (name line)
     ProjectDetail(usize), // index into self.projects (detail line: git branch, future metadata)
-    Separator,            // blank line between cards
+    CardTop,              // ╭───────────────╮
+    CardBottom,           // ╰───────────────╯
+    CardDivider,          // ├───────────────┤ (shared border between cards)
 }
 
 impl RenderLine {
     fn project_index(&self) -> Option<usize> {
         match self {
             RenderLine::ProjectRow(idx) | RenderLine::ProjectDetail(idx) => Some(*idx),
-            RenderLine::Header(_) | RenderLine::Separator => None,
+            RenderLine::Header(_) | RenderLine::CardTop | RenderLine::CardBottom | RenderLine::CardDivider => None,
         }
     }
 }
@@ -143,6 +140,9 @@ struct State {
     cached_metadata: BTreeMap<String, ProjectMetadata>,
     pending_commands: usize,
     poll_tick: usize,
+
+    // AI state — stored separately so SessionUpdate never wipes it
+    ai_states: BTreeMap<String, AgentState>,
 }
 
 impl Default for State {
@@ -170,6 +170,7 @@ impl Default for State {
             cached_metadata: BTreeMap::new(),
             pending_commands: 0,
             poll_tick: 0,
+            ai_states: BTreeMap::new(),
         }
     }
 }
@@ -512,6 +513,15 @@ layout {
     }
 
     fn apply_cached_metadata(&mut self) {
+        let keys_with_agent: Vec<_> = self.cached_metadata.iter()
+            .filter(|(_, m)| !matches!(m.agent.state, AgentState::Unknown))
+            .map(|(k, m)| format!("{}={:?}", k, m.agent.state))
+            .collect();
+        if !keys_with_agent.is_empty() {
+            eprintln!("apply_cached_metadata: AI states in cache: {:?}", keys_with_agent);
+            let project_names: Vec<_> = self.projects.iter().map(|p| p.name.clone()).collect();
+            eprintln!("apply_cached_metadata: project names: {:?}", project_names);
+        }
         for project in &mut self.projects {
             if let Some(meta) = self.cached_metadata.get(&project.name) {
                 project.metadata = meta.clone();
@@ -559,22 +569,35 @@ layout {
         let mut lines = Vec::new();
         let filtered = self.filtered_indices();
 
-        if self.use_discovery && self.browse_mode && !filtered.is_empty() {
+        if self.browse_mode && !filtered.is_empty() {
             lines.push(RenderLine::Header("All projects".to_string()));
         }
 
+        let total = filtered.len();
         for (fi, &i) in filtered.iter().enumerate() {
             let project = &self.projects[i];
+
+            if fi == 0 {
+                lines.push(RenderLine::CardTop);
+            } else {
+                lines.push(RenderLine::CardDivider);
+            }
+
             lines.push(RenderLine::ProjectRow(i));
 
-            // Detail line for projects with sessions (Running or Exited) — not NotStarted
-            if !matches!(project.status, SessionStatus::NotStarted) {
+            // Detail line when there's meaningful content
+            let multi_tab = matches!(project.status, SessionStatus::Running { tab_count, .. } if tab_count > 1);
+            let has_command = matches!(project.status, SessionStatus::Running { is_current: true, active_command: Some(_), .. });
+            let ai_state = self.ai_states.get(&project.name);
+            let has_claude = ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown));
+            let has_pills = !project.metadata.pills.is_empty();
+            let has_progress = project.metadata.progress_pct.is_some();
+            if multi_tab || has_command || has_claude || has_pills || has_progress {
                 lines.push(RenderLine::ProjectDetail(i));
             }
 
-            // Separator between cards (not after last)
-            if fi < filtered.len() - 1 {
-                lines.push(RenderLine::Separator);
+            if fi == total - 1 {
+                lines.push(RenderLine::CardBottom);
             }
         }
 
@@ -613,146 +636,131 @@ layout {
 
     fn render_project_name_line(&self, project: &Project, is_selected: bool, cols: usize) -> Text {
         let needs_attention = self.attention_sessions.contains(&project.name);
-        let status_dot = if needs_attention {
-            "◆" // diamond for attention
+        let is_current_session = matches!(&project.status, SessionStatus::Running { is_current: true, .. });
+
+        // Determine icon + color based on state priority
+        let ai_state = self.ai_states.get(&project.name);
+        let (status_icon, dot_color) = if needs_attention {
+            ("◆", COLOR_RED)        // filled diamond = needs attention NOW
+        } else if is_current_session {
+            ("✦", COLOR_GREEN)      // sparkle = AI/current
         } else {
-            match &project.status {
-                SessionStatus::Running { .. } => "●",
-                SessionStatus::Exited => "●",
-                SessionStatus::NotStarted => "○",
+            match ai_state {
+                Some(AgentState::Active) => ("✦", COLOR_GREEN),   // sparkle = Claude working
+                Some(AgentState::Waiting) => ("◇", COLOR_YELLOW),  // hollow diamond = needs input
+                Some(AgentState::Idle) => ("○", COLOR_CYAN),       // hollow circle = done, your turn
+                _ => match &project.status {
+                    SessionStatus::Running { .. } => ("●", COLOR_GREEN),
+                    SessionStatus::Exited => ("●", COLOR_YELLOW),
+                    SessionStatus::NotStarted => ("○", COLOR_CYAN),
+                },
             }
         };
 
-        let line = match self.verbosity {
-            Verbosity::Minimal => {
-                format!(" │ {} {}", status_dot, project.name)
-            }
-            Verbosity::Full => {
-                let mut parts = format!(" │ {} {}", status_dot, project.name);
-                if let SessionStatus::Running { tab_count, .. } = &project.status {
-                    parts.push_str(&format!(" [{}]", tab_count));
-                }
-                if let SessionStatus::Running {
-                    is_current: true,
-                    active_command: Some(cmd),
-                    ..
-                } = &project.status
-                {
-                    parts.push_str(&format!(" {}", cmd));
-                }
-                // Git branch is now rendered on the detail line — do NOT add it here
-                parts
-            }
-        };
-
-        let display_line: String = if line.chars().count() > cols {
-            line.chars().take(cols.saturating_sub(1)).collect::<String>() + "…"
+        // Name line: "│ ✦ name                    │"
+        let content = format!(" {} {}", status_icon, project.name);
+        let inner_width = cols.saturating_sub(2);
+        let padded: String = if content.chars().count() > inner_width {
+            content.chars().take(inner_width.saturating_sub(1)).collect::<String>() + "…"
         } else {
-            line
+            format!("{:<width$}", content, width = inner_width)
         };
+        let display_line = format!("│{}│", padded);
 
         let mut text = Text::new(&display_line);
-        let is_current_session = matches!(&project.status, SessionStatus::Running { is_current: true, .. });
 
         if is_selected {
             text = text.selected();
         }
 
-        // Determine the border + dot color based on attention, session status, and agent state
-        // Format is " │ ● name" — │ is at char index 1, dot is at char index 3
-        let border_dot_color = if needs_attention {
-            COLOR_RED
-        } else if is_current_session {
-            COLOR_GREEN
-        } else {
-            match &project.metadata.agent.state {
-                AgentState::Active => COLOR_GREEN,
-                AgentState::Waiting => COLOR_YELLOW,
-                AgentState::Idle => COLOR_GRAY,
-                AgentState::Unknown => {
-                    // Fall back to session-status-based coloring
-                    match &project.status {
-                        SessionStatus::Running { .. } => COLOR_GREEN,
-                        SessionStatus::Exited => COLOR_YELLOW,
-                        SessionStatus::NotStarted => COLOR_GRAY,
-                    }
-                }
-            }
-        };
+        let line_len = display_line.chars().count();
 
-        if needs_attention {
-            // Red border and diamond dot for attention needed
-            text = text.color_range(border_dot_color, 1..2); // │ border
-            text = text.color_range(border_dot_color, 3..4); // dot
-        } else if is_current_session {
-            // Highlight entire line green for the current session
-            text = text.color_range(COLOR_GREEN, 0..display_line.chars().count());
-        } else {
-            // Color the left border (│ at char index 1) and the status dot (char index 3)
-            text = text.color_range(border_dot_color, 1..2); // │ border
-            text = text.color_range(border_dot_color, 3..4); // dot
+        // First color wins per character — apply most specific first
+        // Icon color (char 2)
+        text = text.color_range(dot_color, 2..3);
+        // Borders (cyan to match Zellij frame)
+        text = text.color_range(COLOR_CYAN, 0..1);
+        text = text.color_range(COLOR_CYAN, line_len.saturating_sub(1)..line_len);
+
+        if is_current_session {
+            // Green the name text (after icon, before right border)
+            text = text.color_range(COLOR_GREEN, 4..line_len.saturating_sub(1));
+        } else if matches!(project.status, SessionStatus::NotStarted | SessionStatus::Exited) {
+            // Dim inactive projects — they're background context
+            text = text.color_range(COLOR_CYAN, 4..line_len.saturating_sub(1));
         }
-
-        if self.verbosity == Verbosity::Full && !is_current_session {
-            if let SessionStatus::Running { tab_count, is_current, active_command, .. } = &project.status {
-                // Format: " │ ● name [N] cmd" — dot is at index 3, name starts at 5
-                // name_end = 5 (prefix " │ ● ") + name.chars().count()
-                let name_end = 5 + project.name.chars().count();
-                let bracket_str = format!("[{}]", tab_count);
-                let bracket_start = name_end + 1;
-                let bracket_end = bracket_start + bracket_str.chars().count() + 1;
-
-                if display_line.chars().count() > bracket_start {
-                    let actual_end = bracket_end.min(display_line.chars().count());
-                    text = text.color_range(COLOR_GRAY, bracket_start..actual_end);
-                }
-
-                if *is_current {
-                    if let Some(cmd) = active_command {
-                        let cmd_start = bracket_end;
-                        let cmd_end = cmd_start + cmd.chars().count() + 1;
-                        if display_line.chars().count() > cmd_start {
-                            let actual_end = cmd_end.min(display_line.chars().count());
-                            text = text.color_range(COLOR_BLUE, cmd_start..actual_end);
-                        }
-                    }
-                }
-            }
-        }
+        // Running non-current: name text stays default (full contrast, these matter)
 
         text
     }
 
     fn render_detail_line(&self, project: &Project, is_selected: bool, cols: usize) -> Text {
-        let mut parts = String::from(" │ "); // left border to align under name line
+        let mut content = String::from("   "); // indent past dot, aligned under name
+        let mut segments: Vec<(usize, usize, usize)> = Vec::new(); // (start, end, color) — indices relative to final display_line
+        let mut has_content = false;
 
-        // Git branch
-        let branch_start = parts.chars().count(); // position after the " │ " prefix
-        if let Some(ref branch) = project.metadata.git_branch {
-            let display_branch = if branch == "HEAD" { "detached" } else { branch.as_str() };
-            parts.push_str(display_branch);
+        // Order: claude indicator → active command → tab count
+
+        // Claude indicator — show for ANY session with AI state (not just current)
+        let ai_state = self.ai_states.get(&project.name);
+        if ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown)) {
+            let label = match ai_state.unwrap() {
+                AgentState::Active => "claude ●",
+                AgentState::Idle => "claude ○",
+                AgentState::Waiting => "claude ◇",
+                AgentState::Unknown => unreachable!(),
+            };
+            let start = content.chars().count() + 1; // +1 for left │
+            content.push_str(label);
+            let end = content.chars().count() + 1;
+            segments.push((start, end, COLOR_GREEN));
+            has_content = true;
+        } else if let SessionStatus::Running { is_current: true, active_command: Some(cmd), .. } = &project.status {
+            // Fallback: show active_command from Zellij API (current session only)
+            if has_content { content.push_str(" · "); }
+            let start = content.chars().count() + 1;
+            content.push_str(cmd);
+            let end = content.chars().count() + 1;
+            segments.push((start, end, COLOR_GREEN));
+            has_content = true;
         }
-        let branch_end = parts.chars().count();
+
+        // Tab count — only show when >1
+        if let SessionStatus::Running { tab_count, .. } = &project.status {
+            if *tab_count > 1 {
+                if has_content { content.push_str(" · "); }
+                content.push_str(&format!("{} tabs", tab_count));
+                has_content = true;
+            }
+        }
+
+        // Git branch — disabled for now, may return on a dedicated third line
 
         // Pills: render as key:value pairs (limit to first 3)
         for (key, value) in project.metadata.pills.iter().take(3) {
-            parts.push_str(&format!(" {}:{}", key, value));
+            if has_content { content.push_str(" · "); }
+            content.push_str(&format!("{}:{}", key, value));
+            has_content = true;
         }
 
         // Progress bar: only render if there is room
         if let Some(pct) = project.metadata.progress_pct {
             let bar = render_progress_bar(pct, 7);
-            let progress_str = format!("  {} {}%", bar, pct);
-            if parts.chars().count() + progress_str.chars().count() < cols {
-                parts.push_str(&progress_str);
+            let progress_str = format!(" {} {}%", bar, pct);
+            if content.chars().count() + progress_str.chars().count() + 2 < cols {
+                if has_content { content.push_str("  "); }
+                content.push_str(&progress_str);
             }
         }
 
-        let display_line: String = if parts.chars().count() > cols {
-            parts.chars().take(cols.saturating_sub(1)).collect::<String>() + "..."
+        // Pad and wrap with borders: "│content          │"
+        let inner_width = cols.saturating_sub(2);
+        let padded: String = if content.chars().count() > inner_width {
+            content.chars().take(inner_width.saturating_sub(1)).collect::<String>() + "…"
         } else {
-            parts
+            format!("{:<width$}", content, width = inner_width)
         };
+        let display_line = format!("│{}│", padded);
 
         let mut text = Text::new(&display_line);
 
@@ -760,38 +768,24 @@ layout {
             text = text.selected();
         }
 
-        // Color the left border │ (char index 1) based on agent/session state
         let is_current_session = matches!(&project.status, SessionStatus::Running { is_current: true, .. });
-        let needs_attention = self.attention_sessions.contains(&project.name);
+        let line_len = display_line.chars().count();
 
-        let border_color = if needs_attention {
-            COLOR_RED
-        } else if is_current_session {
-            COLOR_GREEN
-        } else {
-            match &project.metadata.agent.state {
-                AgentState::Active => COLOR_GREEN,
-                AgentState::Waiting => COLOR_YELLOW,
-                AgentState::Idle => COLOR_GRAY,
-                AgentState::Unknown => match &project.status {
-                    SessionStatus::Running { .. } => COLOR_GREEN,
-                    SessionStatus::Exited => COLOR_YELLOW,
-                    SessionStatus::NotStarted => COLOR_GRAY,
-                },
-            }
-        };
-
+        // First color wins — apply specific segments first, then borders
         if is_current_session {
-            // Current session: green across entire detail line (matches name line behavior)
-            text = text.color_range(COLOR_GREEN, 0..display_line.chars().count());
+            text = text.color_range(COLOR_GREEN, 1..line_len.saturating_sub(1));
         } else {
-            // Color the │ border char (char index 1)
-            text = text.color_range(border_color, 1..2);
-            // Color branch text in blue for non-current sessions
-            if project.metadata.git_branch.is_some() && branch_end > branch_start {
-                text = text.color_range(COLOR_BLUE, branch_start..branch_end);
+            // Colored segments first (e.g., active command in cyan)
+            for (start, end, color) in &segments {
+                if *end < line_len {
+                    text = text.color_range(*color, *start..*end);
+                }
             }
+            // Detail text stays default (uncolored = theme foreground, naturally dimmer than names)
         }
+        // Borders last (cyan to match Zellij frame)
+        text = text.color_range(COLOR_CYAN, 0..1);
+        text = text.color_range(COLOR_CYAN, line_len.saturating_sub(1)..line_len);
 
         text
     }
@@ -951,12 +945,10 @@ impl ZellijPlugin for State {
                     self.update_cached_statuses(&sessions, &resurrectable);
                     self.has_session_data = true;
 
-                    // Clear cached metadata for sessions that are no longer running
-                    let running_names: BTreeSet<String> = self.cached_statuses.iter()
-                        .filter(|(_, s)| matches!(s, SessionStatus::Running { .. }))
-                        .map(|(name, _)| name.clone())
-                        .collect();
-                    self.cached_metadata.retain(|name, _| running_names.contains(name));
+                    // Keep metadata for all known sessions (not just running)
+                    // AI state from pipe messages must survive SessionUpdate cycles
+                    let known_names: BTreeSet<String> = self.cached_statuses.keys().cloned().collect();
+                    self.cached_metadata.retain(|name, _| known_names.contains(name));
 
                     if self.scan_complete {
                         self.apply_cached_statuses();
@@ -975,6 +967,7 @@ impl ZellijPlugin for State {
                             })
                             .collect();
                         self.projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                        self.apply_cached_metadata(); // Preserve AI state from pipe messages
                         self.clamp_selection();
                         self.initial_load_complete = true;
                     }
@@ -1152,6 +1145,7 @@ impl ZellijPlugin for State {
             return;
         }
 
+
         if !self.initial_load_complete {
             if self.use_discovery {
                 println!("Scanning...");
@@ -1184,7 +1178,7 @@ impl ZellijPlugin for State {
             } else {
                 search_line
             };
-            let text = Text::new(&display).color_range(COLOR_BLUE, 0..display.chars().count());
+            let text = Text::new(&display).color_range(COLOR_CYAN, 0..display.chars().count());
             print_text_with_coordinates(text, 0, 0, Some(cols), None);
             y_offset = 1;
         }
@@ -1198,7 +1192,7 @@ impl ZellijPlugin for State {
             } else {
                 " No active sessions"
             };
-            let text = Text::new(msg).color_all(COLOR_GRAY);
+            let text = Text::new(msg).color_all(COLOR_CYAN);
             print_text_with_coordinates(text, 0, y_offset, Some(cols), None);
 
             // Still show footer with hint
@@ -1212,7 +1206,7 @@ impl ZellijPlugin for State {
                     ""
                 };
                 if !hint.is_empty() {
-                    let hint_text = Text::new(hint).color_all(COLOR_GRAY);
+                    let hint_text = Text::new(hint).color_all(COLOR_CYAN);
                     print_text_with_coordinates(hint_text, 0, footer_y, Some(cols), None);
                 }
             }
@@ -1235,7 +1229,7 @@ impl ZellijPlugin for State {
                     } else {
                         header
                     };
-                    let text = Text::new(&header_line).color_all(COLOR_GRAY);
+                    let text = Text::new(&header_line).color_all(COLOR_CYAN);
                     print_text_with_coordinates(text, 0, screen_y, Some(cols), None);
                 }
                 RenderLine::ProjectRow(project_idx) => {
@@ -1250,11 +1244,25 @@ impl ZellijPlugin for State {
                     let text = self.render_detail_line(project, is_selected, cols);
                     print_text_with_coordinates(text, 0, screen_y, Some(cols), None);
                 }
-                RenderLine::Separator => {
-                    // Top rule for the next card
-                    let rule = format!(" ┌{}", "─".repeat(cols.saturating_sub(3)));
+                RenderLine::CardTop => {
+                    let inner_width = cols.saturating_sub(2);
+                    let rule = format!("╭{}╮", "─".repeat(inner_width));
                     let display: String = rule.chars().take(cols).collect();
-                    let text = Text::new(&display).color_all(COLOR_GRAY);
+                    let text = Text::new(&display).color_all(COLOR_CYAN);
+                    print_text_with_coordinates(text, 0, screen_y, Some(cols), None);
+                }
+                RenderLine::CardBottom => {
+                    let inner_width = cols.saturating_sub(2);
+                    let rule = format!("╰{}╯", "─".repeat(inner_width));
+                    let display: String = rule.chars().take(cols).collect();
+                    let text = Text::new(&display).color_all(COLOR_CYAN);
+                    print_text_with_coordinates(text, 0, screen_y, Some(cols), None);
+                }
+                RenderLine::CardDivider => {
+                    let inner_width = cols.saturating_sub(2);
+                    let rule = format!("├{}┤", "─".repeat(inner_width));
+                    let display: String = rule.chars().take(cols).collect();
+                    let text = Text::new(&display).color_all(COLOR_CYAN);
                     print_text_with_coordinates(text, 0, screen_y, Some(cols), None);
                 }
             }
@@ -1277,7 +1285,7 @@ impl ZellijPlugin for State {
             } else {
                 hint.to_string()
             };
-            let hint_text = Text::new(&hint_line).color_all(COLOR_GRAY);
+            let hint_text = Text::new(&hint_line).color_all(COLOR_CYAN);
             print_text_with_coordinates(hint_text, 0, footer_y, Some(cols), None);
         }
     }
@@ -1314,24 +1322,27 @@ impl ZellijPlugin for State {
                 eprintln!("Sidebar activated via pipe (legacy focus_sidebar)");
                 true
             }
-            "sidebar::ai" => {
-                if let Some(session) = pipe_message.args.get("session").cloned() {
-                    let meta = self.cached_metadata.entry(session.clone()).or_default();
-                    meta.agent.state = match pipe_message.args.get("state").map(|s| s.as_str()) {
-                        Some("active") => AgentState::Active,
-                        Some("idle") => AgentState::Idle,
-                        Some("waiting") => AgentState::Waiting,
-                        _ => AgentState::Unknown,
-                    };
-                    if let Some(tool) = pipe_message.args.get("tool") {
-                        meta.agent.last_tool = Some(tool.clone());
-                    }
-                    eprintln!("AI state updated: {:?} for {}", pipe_message.args.get("state"), session);
-                    self.apply_cached_metadata();
-                    true
-                } else {
-                    false
+            // sidebar::ai-active::{session} / sidebar::ai-idle::{session} / sidebar::ai-waiting::{session}
+            name if name.starts_with("sidebar::ai-active::") => {
+                let session = name.strip_prefix("sidebar::ai-active::").unwrap_or("").to_string();
+                if !session.is_empty() {
+                    self.ai_states.insert(session, AgentState::Active);
                 }
+                true
+            }
+            name if name.starts_with("sidebar::ai-idle::") => {
+                let session = name.strip_prefix("sidebar::ai-idle::").unwrap_or("").to_string();
+                if !session.is_empty() {
+                    self.ai_states.insert(session, AgentState::Idle);
+                }
+                true
+            }
+            name if name.starts_with("sidebar::ai-waiting::") => {
+                let session = name.strip_prefix("sidebar::ai-waiting::").unwrap_or("").to_string();
+                if !session.is_empty() {
+                    self.ai_states.insert(session, AgentState::Waiting);
+                }
+                true
             }
             "sidebar::pill" => {
                 let session = pipe_message.args.get("session").cloned();
