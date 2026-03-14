@@ -644,6 +644,9 @@ impl ZellijPlugin for State {
         }
         subscribe(&events);
 
+        // Ensure pane is focusable so user can accept the permissions dialog
+        set_selectable(true);
+
         eprintln!("Plugin loaded, requesting permissions");
     }
 
