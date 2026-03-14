@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Rich Cards
 status: completed
-stopped_at: "Checkpoint: 07-02 Task 3 human-verify (pills/progress/AI dot live verification)"
-last_updated: "2026-03-14T17:04:23.422Z"
+stopped_at: "Checkpoint: 07.1-01 Task 2 human-verify (cross-session AI visibility live verification)"
+last_updated: "2026-03-14T22:38:38.193Z"
 last_activity: 2026-03-14 — Completed Phase 7 Plan 01 (AgentState/AgentStatus, pills/progress fields, 5 pipe handlers)
 progress:
-  total_phases: 8
-  completed_phases: 4
-  total_plans: 8
-  completed_plans: 5
+  total_phases: 9
+  completed_phases: 5
+  total_plans: 9
+  completed_plans: 6
   percent: 50
 ---
 
@@ -45,6 +45,7 @@ Progress: [█████░░░░░] 50%
 | 06    | 01   | 2min     | 3     | 1     |
 | 07    | 01   | 5min     | 2     | 1     |
 | Phase 07 P02 | 3min | 2 tasks | 2 files |
+| Phase 07.1-01 P01 | 8min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -69,20 +70,28 @@ Progress: [█████░░░░░] 50%
 - [Phase 07]: Pipe protocol uses args dict (session, state, tool, key, value, pct) for all sidebar:: handlers
 - [Phase 07]: Left border │ and dot share border_dot_color for consistent AI state visual signal
 - [Phase 07]: Separator renders as top rule ┌─── (between-card); first card has no top rule to avoid click mapping changes
+- [Phase 07.1]: serde_json + /cache as shared AI state bus across Zellij sessions
+- [Phase 07.1]: Timer handler is read-only from /cache; pipe handlers are write path only
+- [Phase 07.1]: extract_active_command called unconditionally for all sessions — passive cross-session detection
 
 ### Pending Todos
 
 None yet.
 
+### Roadmap Evolution
+
+- Phase 07.1 inserted after Phase 7: Cross-Session AI Visibility (URGENT)
+
 ### Blockers/Concerns
 
 - ~~Pipe protocol format: `::` name encoding vs `args` dict~~ (RESOLVED in Phase 7 Plan 01: args dict used for sidebar::ai/pill/progress)
+- ~~Cross-session AI state visibility~~ (SOLUTION FOUND: SessionUpdate has terminal_command for all sessions, /cache for persistence, -s flag for cross-session pipes)
 - Port attribution: PID-to-session mapping impossible from WASM sandbox -- pipe-based is reliable, lsof is stretch goal
 - ~~Fixed vs variable card height: decide during Phase 6 planning~~ (RESOLVED: 2-line cards for Running/Exited, 1-line for NotStarted)
 - ~~RunCommands permission: must be requested unconditionally~~ (RESOLVED in Phase 5 Plan 01)
 
 ## Session Continuity
 
-Last session: 2026-03-14T17:04:23.420Z
-Stopped at: Checkpoint: 07-02 Task 3 human-verify (pills/progress/AI dot live verification)
+Last session: 2026-03-14T22:38:38.191Z
+Stopped at: Checkpoint: 07.1-01 Task 2 human-verify (cross-session AI visibility live verification)
 Resume file: None

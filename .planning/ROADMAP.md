@@ -28,7 +28,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Data Model + Polling Infrastructure** - ProjectMetadata struct, timer-driven polling loop, git branch detection via run_command
 - [x] **Phase 6: Multi-Line Card Rendering** - Atomic refactor of rendering, mouse, scroll, and selection to support multi-line project cards
 - [x] **Phase 7: Pipe Protocol -- Pills + Progress** - External metadata injection via pipe messages with card rendering for pills and progress bars (completed 2026-03-14)
-- [ ] **Phase 7.1: Cross-Session AI Visibility (INSERTED)** - /cache persistence, passive detection, and timer refresh for cross-session AI state sharing
+- [x] **Phase 7.1: Cross-Session AI Visibility (INSERTED)** - /cache persistence, passive detection, and timer refresh for cross-session AI state sharing (completed 2026-03-14)
 - [ ] **Phase 8: Port Detection + Polish** - Listening port display via auto-detection (lsof) and pipe-based reporting
 
 ## Phase Details
@@ -155,5 +155,5 @@ Phases execute in numeric order: 5 -> 6 -> 7 -> 7.1 -> 8
 | 5. Data Model + Polling Infrastructure | v1.1 | 1/1 | Complete | 2026-03-14 |
 | 6. Multi-Line Card Rendering | v1.1 | 1/1 | Complete | 2026-03-14 |
 | 7. Pipe Protocol -- Pills + Progress | v1.1 | 2/2 | Complete | 2026-03-14 |
-| 7.1 Cross-Session AI Visibility | v1.1 | 0/1 | Not started | - |
+| 7.1 Cross-Session AI Visibility | 1/1 | Complete   | 2026-03-14 | - |
 | 8. Port Detection + Polish | v1.1 | 0/? | Not started | - |
