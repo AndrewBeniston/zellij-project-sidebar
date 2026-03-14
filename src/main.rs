@@ -48,7 +48,8 @@ enum SessionStatus {
     NotStarted,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 enum AgentState {
     Active,
     Idle,
@@ -453,11 +454,7 @@ layout {
         self.cached_statuses.clear();
         for session in sessions {
             let tab_count = session.tabs.len();
-            let active_command = if session.is_current_session {
-                extract_active_command(session)
-            } else {
-                None
-            };
+            let active_command = extract_active_command(session);
             self.cached_statuses.insert(
                 session.name.clone(),
                 SessionStatus::Running {
@@ -587,7 +584,7 @@ layout {
 
             // Detail line when there's meaningful content
             let multi_tab = matches!(project.status, SessionStatus::Running { tab_count, .. } if tab_count > 1);
-            let has_command = matches!(project.status, SessionStatus::Running { is_current: true, active_command: Some(_), .. });
+            let has_command = matches!(project.status, SessionStatus::Running { active_command: Some(_), .. });
             let ai_state = self.ai_states.get(&project.name);
             let has_claude = ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown));
             let has_pills = !project.metadata.pills.is_empty();
@@ -715,8 +712,8 @@ layout {
             let end = content.chars().count() + 1;
             segments.push((start, end, COLOR_GREEN));
             has_content = true;
-        } else if let SessionStatus::Running { is_current: true, active_command: Some(cmd), .. } = &project.status {
-            // Fallback: show active_command from Zellij API (current session only)
+        } else if let SessionStatus::Running { active_command: Some(cmd), .. } = &project.status {
+            // Fallback: show active_command from Zellij API (any session)
             if has_content { content.push_str(" · "); }
             let start = content.chars().count() + 1;
             content.push_str(cmd);
@@ -788,6 +785,32 @@ layout {
         text = text.color_range(COLOR_CYAN, line_len.saturating_sub(1)..line_len);
 
         text
+    }
+
+    fn save_ai_states(&self) {
+        match serde_json::to_string(&self.ai_states) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write("/cache/agent_state.json", json) {
+                    eprintln!("Failed to write ai_states cache: {}", e);
+                }
+            }
+            Err(e) => eprintln!("Failed to serialize ai_states: {}", e),
+        }
+    }
+
+    fn load_ai_states(&mut self) {
+        match std::fs::read_to_string("/cache/agent_state.json") {
+            Ok(data) => {
+                match serde_json::from_str::<BTreeMap<String, AgentState>>(&data) {
+                    Ok(states) => {
+                        self.ai_states = states;
+                        eprintln!("Loaded {} ai_states from cache", self.ai_states.len());
+                    }
+                    Err(e) => eprintln!("Failed to parse ai_states cache: {}", e),
+                }
+            }
+            Err(_) => {} // File doesn't exist yet — normal on first load
+        }
     }
 }
 
@@ -873,6 +896,9 @@ impl ZellijPlugin for State {
         // Ensure pane is focusable so user can accept the permissions dialog
         set_selectable(true);
 
+        // Restore persisted AI state so cross-session dots are visible immediately
+        self.load_ai_states();
+
         eprintln!("Plugin loaded, requesting permissions");
     }
 
@@ -949,6 +975,8 @@ impl ZellijPlugin for State {
                     // AI state from pipe messages must survive SessionUpdate cycles
                     let known_names: BTreeSet<String> = self.cached_statuses.keys().cloned().collect();
                     self.cached_metadata.retain(|name, _| known_names.contains(name));
+                    // Prune stale AI states for sessions that no longer exist
+                    self.ai_states.retain(|name, _| known_names.contains(name));
 
                     if self.scan_complete {
                         self.apply_cached_statuses();
@@ -975,11 +1003,7 @@ impl ZellijPlugin for State {
                     for project in &mut self.projects {
                         if let Some(session) = sessions.iter().find(|s| s.name == project.name) {
                             let tab_count = session.tabs.len();
-                            let active_command = if session.is_current_session {
-                                extract_active_command(session)
-                            } else {
-                                None
-                            };
+                            let active_command = extract_active_command(session);
                             project.status = SessionStatus::Running {
                                 is_current: session.is_current_session,
                                 tab_count,
@@ -991,6 +1015,10 @@ impl ZellijPlugin for State {
                             project.status = SessionStatus::NotStarted;
                         }
                     }
+                    // Prune stale AI states for sessions that no longer exist
+                    let active_session_names: BTreeSet<String> = sessions.iter().map(|s| s.name.clone()).collect();
+                    let resurrectable_names: BTreeSet<String> = resurrectable.iter().map(|(n, _)| n.clone()).collect();
+                    self.ai_states.retain(|name, _| active_session_names.contains(name) || resurrectable_names.contains(name));
                     self.initial_load_complete = true;
                 }
                 // Auto-track current session when sidebar is not actively navigated
@@ -1125,6 +1153,8 @@ impl ZellijPlugin for State {
                 _ => false,
             },
             Event::Timer(_elapsed) => {
+                // Refresh cross-session AI state from /cache on every tick
+                self.load_ai_states();
                 if self.pending_commands == 0 {
                     self.poll_tick += 1;
                     self.poll_git_branches();
@@ -1133,7 +1163,7 @@ impl ZellijPlugin for State {
                     // Commands still pending from last cycle, skip this tick
                     eprintln!("Poll tick skipped -- {} commands still pending", self.pending_commands);
                 }
-                false // don't re-render on timer, wait for results
+                true // re-render to show updated cross-session AI state
             }
             _ => false,
         }
@@ -1327,6 +1357,7 @@ impl ZellijPlugin for State {
                 let session = name.strip_prefix("sidebar::ai-active::").unwrap_or("").to_string();
                 if !session.is_empty() {
                     self.ai_states.insert(session, AgentState::Active);
+                    self.save_ai_states();
                 }
                 true
             }
@@ -1334,6 +1365,7 @@ impl ZellijPlugin for State {
                 let session = name.strip_prefix("sidebar::ai-idle::").unwrap_or("").to_string();
                 if !session.is_empty() {
                     self.ai_states.insert(session, AgentState::Idle);
+                    self.save_ai_states();
                 }
                 true
             }
@@ -1341,6 +1373,7 @@ impl ZellijPlugin for State {
                 let session = name.strip_prefix("sidebar::ai-waiting::").unwrap_or("").to_string();
                 if !session.is_empty() {
                     self.ai_states.insert(session, AgentState::Waiting);
+                    self.save_ai_states();
                 }
                 true
             }
