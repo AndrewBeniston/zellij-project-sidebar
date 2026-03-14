@@ -53,11 +53,33 @@ enum SessionStatus {
     NotStarted,
 }
 
+#[derive(Clone, PartialEq)]
+enum AgentState {
+    Active,
+    Idle,
+    Waiting,
+    Unknown,
+}
+
+impl Default for AgentState {
+    fn default() -> Self {
+        AgentState::Unknown
+    }
+}
+
+#[derive(Clone, Default)]
+struct AgentStatus {
+    state: AgentState,
+    last_tool: Option<String>,
+}
+
 #[derive(Clone, Default)]
 struct ProjectMetadata {
     git_branch: Option<String>,
     is_git_repo: Option<bool>, // None = unknown, Some(false) = not git, Some(true) = is git
-    // Future phases add: listening_ports, pills, progress
+    agent: AgentStatus,
+    pills: BTreeMap<String, String>,
+    progress_pct: Option<u8>,
 }
 
 #[derive(Clone)]

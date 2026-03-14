@@ -9,11 +9,11 @@ Requirements for Rich Cards milestone. Each maps to roadmap phases.
 
 ### Card Layout
 
-- [ ] **CARD-01**: Each project renders as a multi-line card (name+status on line 1, metadata on subsequent lines)
-- [ ] **CARD-02**: Cards have visual separators between them
-- [ ] **CARD-03**: Mouse click maps correctly to multi-line cards (clicking any line of a card selects that project)
-- [ ] **CARD-04**: Scroll and keyboard navigation work correctly with variable-height cards
-- [ ] **CARD-05**: Selection auto-tracks current session when sidebar is unfocused
+- [x] **CARD-01**: Each project renders as a multi-line card (name+status on line 1, metadata on subsequent lines)
+- [x] **CARD-02**: Cards have visual separators between them
+- [x] **CARD-03**: Mouse click maps correctly to multi-line cards (clicking any line of a card selects that project)
+- [x] **CARD-04**: Scroll and keyboard navigation work correctly with variable-height cards
+- [x] **CARD-05**: Selection auto-tracks current session when sidebar is unfocused
 
 ### Data Pipeline
 
@@ -79,11 +79,11 @@ Requirements for Rich Cards milestone. Each maps to roadmap phases.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CARD-01 | Phase 6 | Pending |
-| CARD-02 | Phase 6 | Pending |
-| CARD-03 | Phase 6 | Pending |
-| CARD-04 | Phase 6 | Pending |
-| CARD-05 | Phase 6 | Pending |
+| CARD-01 | Phase 6 | Complete |
+| CARD-02 | Phase 6 | Complete |
+| CARD-03 | Phase 6 | Complete |
+| CARD-04 | Phase 6 | Complete |
+| CARD-05 | Phase 6 | Complete |
 | DATA-01 | Phase 5 | Complete |
 | DATA-02 | Phase 5 | Complete |
 | DATA-03 | Phase 5 | Complete |
@@ -107,4 +107,4 @@ Requirements for Rich Cards milestone. Each maps to roadmap phases.
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after roadmap creation*
+*Last updated: 2026-03-14 after Phase 6 Plan 01 completion (CARD-01 through CARD-05 complete)*

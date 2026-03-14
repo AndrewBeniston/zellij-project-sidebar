@@ -25,8 +25,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 ### v1.1 Rich Cards (In Progress)
 
-- [ ] **Phase 5: Data Model + Polling Infrastructure** - ProjectMetadata struct, timer-driven polling loop, git branch detection via run_command
-- [ ] **Phase 6: Multi-Line Card Rendering** - Atomic refactor of rendering, mouse, scroll, and selection to support multi-line project cards
+- [x] **Phase 5: Data Model + Polling Infrastructure** - ProjectMetadata struct, timer-driven polling loop, git branch detection via run_command
+- [x] **Phase 6: Multi-Line Card Rendering** - Atomic refactor of rendering, mouse, scroll, and selection to support multi-line project cards
 - [ ] **Phase 7: Pipe Protocol -- Pills + Progress** - External metadata injection via pipe messages with card rendering for pills and progress bars
 - [ ] **Phase 8: Port Detection + Polish** - Listening port display via auto-detection (lsof) and pipe-based reporting
 
@@ -99,7 +99,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 06-01-PLAN.md -- Atomic card refactor: RenderLine variants, multi-line rendering, mouse/scroll/selection updates
+- [x] 06-01-PLAN.md -- Atomic card refactor: RenderLine variants, multi-line rendering, mouse/scroll/selection updates
 
 ### Phase 7: Pipe Protocol -- Pills + Progress
 **Goal**: External tools can push arbitrary metadata (key-value pills and progress percentages) via pipe messages, and these render on the corresponding project cards
@@ -111,10 +111,11 @@ Plans:
   3. Sending a clear message removes the specified pill or progress bar from the card
   4. An external tool can push a progress percentage (0-100) and see a character-cell progress bar rendered on the project card
   5. When a session exits, any pills and progress associated with that project are automatically cleared
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 07-01: TBD
+- [ ] 07-01-PLAN.md -- Data model (AgentState/AgentStatus, pills, progress) and pipe message handlers
+- [ ] 07-02-PLAN.md -- Card rendering (AI dot, pills, progress bar, card styling) and hook script template
 
 ### Phase 8: Port Detection + Polish
 **Goal**: Listening ports are visible on project cards, detected automatically via lsof or reported via pipe messages
@@ -141,6 +142,6 @@ Phases execute in numeric order: 5 -> 6 -> 7 -> 8
 | 3. Sidebar Layout + Toggle | v1.0 | -/- | Complete | 2026-03-14 |
 | 4. Enrichment + Theme | v1.0 | -/- | Complete | 2026-03-14 |
 | 5. Data Model + Polling Infrastructure | v1.1 | 1/1 | Complete | 2026-03-14 |
-| 6. Multi-Line Card Rendering | v1.1 | 0/1 | Not started | - |
-| 7. Pipe Protocol -- Pills + Progress | v1.1 | 0/? | Not started | - |
+| 6. Multi-Line Card Rendering | v1.1 | 1/1 | Complete | 2026-03-14 |
+| 7. Pipe Protocol -- Pills + Progress | v1.1 | 0/2 | Not started | - |
 | 8. Port Detection + Polish | v1.1 | 0/? | Not started | - |
