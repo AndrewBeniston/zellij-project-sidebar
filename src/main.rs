@@ -283,7 +283,7 @@ layout {{
         plugin location="zellij:tab-bar"
     }}
     pane split_direction="vertical" {{
-        pane size="20%" name="Projects" {{
+        pane size="15%" name="Projects" {{
             plugin location="file:~/.config/zellij/plugins/zellij-project-sidebar.wasm" {{
                 scan_dir "{scan_dir}"
                 session_layout "{session_layout}"
