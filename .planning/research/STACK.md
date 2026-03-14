@@ -1,248 +1,396 @@
-# Technology Stack
+# Technology Stack: v1.1 Rich Cards
 
 **Project:** Zellij Project Sidebar
-**Researched:** 2026-03-11
+**Milestone:** v1.1 Rich Cards (git branch, ports, pills, progress bars)
+**Researched:** 2026-03-14
 
-## Recommended Stack
+## Scope
 
-### Core Framework
+This document covers ONLY the stack additions/changes needed for v1.1 features. The existing stack (Rust, zellij-tile 0.43.1, wasm32-wasip1, serde) is validated and unchanged.
 
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| Rust (stable) | 1.88+ | Plugin language | Only supported language for Zellij WASM plugins. User has 1.88.0 installed. | HIGH |
-| zellij-tile | 0.43.1 | Plugin API crate | Official Rust SDK for Zellij plugins. Must match installed Zellij version (user has 0.43.1). Provides `ZellijPlugin` trait, event system, rendering primitives, session/tab/pane management commands. | HIGH |
-| wasm32-wasip1 | (target) | Compilation target | Required WASM target for Zellij plugins. Note: the old name `wasm32-wasi` was removed from stable Rust in 1.84 (Jan 2025). Must use `wasm32-wasip1` now. User needs to run `rustup target add wasm32-wasip1`. | HIGH |
+## Executive Summary
 
-### Supporting Libraries
+**No new crate dependencies needed.** All v1.1 features are achievable with the existing `zellij-tile` API surface and Rust stdlib. The key unlocks are:
 
-| Library | Version | Purpose | When to Use | Confidence |
-|---------|---------|---------|-------------|------------|
-| serde | ^1.0, features=["derive"] | Config deserialization | Parsing plugin configuration from KDL block attributes into Rust structs. Already a transitive dep of zellij-tile but needed explicitly for derive macros. | HIGH |
-| serde_json | ^1.0 | JSON serialization | Already a transitive dep of zellij-tile. Useful if storing/reading structured config. Only add explicitly if needed for custom serialization. | MEDIUM |
+1. `set_timeout()` + `Event::Timer` for periodic polling (git branch, ports)
+2. `run_command_with_env_variables_and_cwd()` for running git/lsof in project directories
+3. Existing pipe message system for pills and progress bars
+4. Existing `Text` + `color_range` + `print_text_with_coordinates` for multi-line card rendering
 
-### Build Tooling
+## New API Surface Required
 
-| Tool | Version | Purpose | Why | Confidence |
-|------|---------|---------|-----|------------|
-| cargo | 1.88+ | Build system | Standard Rust build. No special build tool needed -- just `cargo build --release` with the wasm32-wasip1 target configured in `.cargo/config.toml`. | HIGH |
-| rustup | latest | Toolchain management | Need it to install `wasm32-wasip1` target: `rustup target add wasm32-wasip1` | HIGH |
+### Timer System (periodic polling)
 
-### Development Environment
+| API | Signature | Purpose | Confidence |
+|-----|-----------|---------|------------|
+| `set_timeout(secs: f64)` | `fn set_timeout(secs: f64)` | Schedule a future `Event::Timer` callback | HIGH |
+| `Event::Timer(f64)` | enum variant | Fires when timer expires, carries the timeout value | HIGH |
+| `EventType::Timer` | subscribe target | Must subscribe to receive Timer events | HIGH |
 
-| Tool | Purpose | Why |
-|------|---------|-----|
-| zellij dev layout (zellij.kdl) | Hot-reload during development | Official pattern: a KDL layout file that opens editor panes + a build pane running `cargo build && zellij action start-or-reload-plugin file:target/wasm32-wasip1/debug/zellij-project-sidebar.wasm`. Ctrl+Shift+R triggers rebuild via `develop-rust-plugin`. |
-| watchexec (optional) | File watcher for auto-rebuild | Alternative to manual Ctrl+Shift+R. Watches `src/` and triggers `cargo build && zellij action start-or-reload-plugin`. Nice but not essential. |
+**Verified:** Read directly from `zellij-tile-0.43.1/src/shim.rs` line 305 and `zellij-utils-0.43.1/src/data.rs` line 891.
 
-## Critical Version Alignment
-
-**zellij-tile version MUST match the installed Zellij version.**
-
-The user has Zellij 0.43.1 installed. The zellij-tile crate is at 0.43.1 on crates.io. This is the version to use. Using an older version (e.g., 0.41.1 from templates) will miss API features and may cause protobuf deserialization issues.
-
-zjstatus (the most actively maintained community plugin) uses zellij-tile 0.43.1 with Rust edition 2024, confirming this is the current standard.
-
-## Project Configuration Files
-
-### `.cargo/config.toml`
-
-```toml
-[build]
-target = "wasm32-wasip1"
-```
-
-Sets the default compilation target so every `cargo build` produces WASM without needing `--target` flag.
-
-### `Cargo.toml`
-
-```toml
-[package]
-name = "zellij-project-sidebar"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-zellij-tile = "0.43.1"
-serde = { version = "1.0", features = ["derive"] }
-
-[profile.release]
-opt-level = "s"
-lto = true
-strip = "debuginfo"
-```
-
-**Edition rationale:** Use 2021 (not 2024). While zjstatus uses 2024, it has a more complex dependency graph. Edition 2021 is the safest choice for a new wasm32-wasip1 project -- fully stable, no edge cases with WASM target. The 2024 edition works but offers no meaningful benefit for this project's scope.
-
-**Release profile rationale:** WASM binary size directly affects plugin load time. `opt-level = "s"` optimizes for size, `lto = true` enables link-time optimization across crate boundaries for smaller output, `strip = "debuginfo"` removes debug symbols from release builds. This is standard practice for all Zellij community plugins.
-
-### `src/main.rs` (skeleton)
+**Pattern** (set-timeout-rearm loop):
 
 ```rust
-use zellij_tile::prelude::*;
-use std::collections::BTreeMap;
+// In load():
+subscribe(&[EventType::Timer, /* ...existing events... */]);
+set_timeout(1.0); // Initial delay before first poll
 
-#[derive(Default)]
-struct State {
-    // Plugin state goes here
-}
-
-register_plugin!(State);
-
-impl ZellijPlugin for State {
-    fn load(&mut self, configuration: BTreeMap<String, String>) {
-        // Subscribe to events, request permissions
-    }
-
-    fn update(&mut self, event: Event) -> bool {
-        // Handle events, return true to trigger re-render
-        false
-    }
-
-    fn render(&mut self, rows: usize, cols: usize) {
-        // Character-cell rendering with Text, Table, NestedList
-    }
-
-    fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
-        // Handle piped messages from keybinds/CLI
-        false
-    }
+// In update():
+Event::Timer(_elapsed) => {
+    self.poll_git_branches();
+    self.poll_listening_ports();
+    set_timeout(10.0); // Rearm for next poll cycle
+    true // trigger re-render
 }
 ```
 
-### `zellij.kdl` (development layout)
+The timer is one-shot. Calling `set_timeout` again inside the Timer handler creates a recurring poll loop. zjstatus uses this exact pattern with a 10-second default interval for git branch polling.
 
-```kdl
-layout {
-    pane split_direction="vertical" {
-        pane edit="src/main.rs"
-        pane split_direction="horizontal" {
-            pane edit="Cargo.toml"
-            pane command="bash" {
-                args "-c" "cargo build && zellij action start-or-reload-plugin file:target/wasm32-wasip1/debug/zellij-project-sidebar.wasm"
-            }
+**No permission required** for `set_timeout`. It is a basic plugin command, not gated by any `PermissionType`.
+
+### run_command with CWD (git branch per project)
+
+| API | Signature | Purpose | Confidence |
+|-----|-----------|---------|------------|
+| `run_command_with_env_variables_and_cwd` | `fn run_command_with_env_variables_and_cwd(cmd: &[&str], env: BTreeMap<String, String>, cwd: PathBuf, ctx: BTreeMap<String, String>)` | Run command with a specific working directory | HIGH |
+
+**Verified:** Read directly from `zellij-tile-0.43.1/src/shim.rs` lines 337-352.
+
+This is critical because the plugin needs to run `git rev-parse --abbrev-ref HEAD` in each project's directory, not the plugin's own CWD. The basic `run_command()` hardcodes CWD to `PathBuf::from(".")` which is the plugin's directory.
+
+**Already have** `PermissionType::RunCommands` requested in discovery mode. For non-discovery mode, this permission must be added.
+
+## Feature-by-Feature Stack Analysis
+
+### 1. Git Branch Detection
+
+**Command:** `git rev-parse --abbrev-ref HEAD`
+**Why this command:** Fast (no network), works in bare repos, returns clean branch name. zjstatus uses the same command. Takes <5ms.
+
+**Edge cases verified locally:**
+| State | Output | Handling |
+|-------|--------|----------|
+| Normal branch | `main`, `feature/foo` | Display as-is |
+| Detached HEAD | `HEAD` (literal string) | Show short SHA instead via `git rev-parse --short HEAD` |
+| Not a git repo | Exit code 128, stderr error | Show nothing (no branch indicator) |
+| Bare repo | Works normally | N/A for project sidebar |
+
+**Implementation approach:**
+
+```rust
+// For each project with a known path, fire off a run_command per poll cycle:
+fn poll_git_branches(&self) {
+    for (idx, project) in self.projects.iter().enumerate() {
+        if project.path.is_empty() {
+            continue;
         }
-    }
-    pane size=30 {
-        plugin location="file:target/wasm32-wasip1/debug/zellij-project-sidebar.wasm"
+        let mut ctx = BTreeMap::new();
+        ctx.insert("cmd".to_string(), "git_branch".to_string());
+        ctx.insert("project_idx".to_string(), idx.to_string());
+        run_command_with_env_variables_and_cwd(
+            &["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            BTreeMap::new(),
+            PathBuf::from(&project.path),
+            ctx,
+        );
     }
 }
 ```
 
-## Alternatives Considered
+**Result handling** in `Event::RunCommandResult`: match on `context["cmd"] == "git_branch"`, parse `project_idx`, store branch name in project state. If stdout is `"HEAD\n"`, optionally run a follow-up `git rev-parse --short HEAD` for the short SHA, or just display a detached indicator.
 
-| Category | Recommended | Alternative | Why Not |
-|----------|-------------|-------------|---------|
-| Plugin crate | zellij-tile 0.43.1 | zellij-tile-extra | Extra is a community crate with minimal adoption. zellij-tile is the official SDK. |
-| Build target | wasm32-wasip1 | wasm32-wasi | Removed from Rust stable in 1.84 (Jan 2025). Will not compile. |
-| Build target | wasm32-wasip1 | wasm32-wasip2 | Zellij uses wasip1. wasip2 is not supported by the Zellij runtime. |
-| Rust edition | 2021 | 2024 | 2024 works but adds no value for this scope. 2021 is battle-tested for wasm32-wasip1. |
-| Rust edition | 2021 | 2018 | Old templates (zellij-org/rust-plugin-example) use 2018. No reason to use an outdated edition. |
-| Serialization | serde (built-in dep) | Manual parsing | zellij-tile already depends on serde. Fighting it is pointless. |
-| Hot reload | zellij dev layout | cargo-watch + separate terminal | Dev layout is self-contained inside Zellij. External watchers add unnecessary complexity. |
-| Template | Manual setup | cargo-generate + rust-plugin-template | Template uses outdated zellij-tile 1.0.0 (a placeholder version). Manual setup with correct 0.43.1 version is more reliable. |
-| Template | Manual setup | create-rust-plugin (zellij plugin) | Useful for learning but generates scaffolding we will customize immediately. Not worth the indirection. |
-| Extra deps | None | kdl crate (6.5.0) | zjstatus uses this for parsing its complex config format. Our config is simple key-value from KDL block attributes -- the `BTreeMap<String, String>` from `load()` is sufficient. |
-| Extra deps | None | chrono, regex, uuid | zjstatus dependencies for its statusbar features. We have no time/regex/ID needs. Keep deps minimal for WASM size. |
+**Polling interval:** 10 seconds (matches zjstatus default). Git branch changes are infrequent enough that 10s is perfectly responsive without wasting cycles.
 
-## What NOT to Use
+**No new crates needed.** `String::from_utf8_lossy(&stdout).trim().to_string()` parses the output.
 
-| Technology | Why Not |
-|------------|---------|
-| `wasm32-wasi` target | Removed from Rust stable. Must use `wasm32-wasip1`. |
-| `wasm32-wasip2` target | Zellij does not support wasip2 runtime. Plugin will fail to load. |
-| `wasm-bindgen` / `serde-wasm-bindgen` | These are for browser WASM. Zellij uses WASI, not browser APIs. |
-| `cargo-wasi` subcommand | Deprecated in favor of standard `cargo build` with target in `.cargo/config.toml`. |
-| `proxy-wasm` | For Envoy/Istio proxies, not terminal multiplexer plugins. |
-| Any async runtime (tokio, async-std) | WASM plugins are single-threaded event-driven. Use Zellij's `ZellijWorker` trait for background tasks and `set_timeout()` for timers. |
-| `zellij-tile-utils` | Minimal crate, not widely adopted. Standard lib utilities suffice. |
-| Mouse handling crates | Project is keyboard-first (v1). Zellij provides `Mouse` event directly. |
+### 2. Listening Port Detection
 
-## Plugin API Surface (What We Need)
+**Command:** `lsof -nP -iTCP -sTCP:LISTEN`
+**Platform:** macOS only (the user's setup is Ghostty + Zellij on macOS).
 
-### Permissions Required
+**Why lsof, not ss:** `ss` is Linux-only. macOS has `lsof` and `netstat`. `lsof -nP -iTCP -sTCP:LISTEN` is the standard macOS approach. Verified locally: runs in ~69ms with `-n` (skip DNS) and `-P` (numeric ports).
 
-| Permission | Why | API Functions Unlocked |
-|------------|-----|----------------------|
-| `ReadApplicationState` | Read session list, tab info, pane info, active session | `SessionUpdate`, `TabUpdate`, `PaneUpdate` events |
-| `ChangeApplicationState` | Switch sessions, kill sessions, create sessions | `switch_session()`, `switch_session_with_cwd()`, `kill_sessions()` |
+**Flag breakdown:**
+| Flag | Purpose |
+|------|---------|
+| `-n` | No DNS resolution (faster) |
+| `-P` | Show port numbers, not service names |
+| `-iTCP` | Only TCP connections |
+| `-sTCP:LISTEN` | Only LISTEN state (servers, not clients) |
 
-### Events to Subscribe
+**Output format:**
+```
+COMMAND   PID  USER  FD  TYPE  DEVICE  SIZE/OFF  NODE  NAME
+node      1234 user  23u IPv4  0x...   0t0       TCP   *:3000 (LISTEN)
+```
 
-| Event | Data Type | Use Case |
-|-------|-----------|----------|
-| `SessionUpdate` | `Vec<SessionInfo>, Vec<(String, Duration)>` | Live session list with tab/pane counts, active session indicator |
-| `Key` | `KeyWithModifier` | Keyboard navigation (j/k, Enter, x, Esc) |
-| `PaneUpdate` | `PaneManifest` | Active pane command display (what's running in focused pane) |
+**Parsing approach:** No regex crate needed. Simple line-by-line parsing:
 
-### Key API Functions
+```rust
+// Parse lsof output: extract port numbers from NAME column
+fn parse_lsof_output(stdout: &[u8], project_name: &str) -> Vec<u16> {
+    let output = String::from_utf8_lossy(stdout);
+    output.lines()
+        .skip(1) // skip header
+        .filter_map(|line| {
+            // NAME column is last, format: "*:3000 (LISTEN)" or "127.0.0.1:8080 (LISTEN)"
+            let name = line.rsplit_whitespace().nth(1)?; // second-to-last field
+            let port_str = name.rsplit(':').next()?;
+            port_str.parse::<u16>().ok()
+        })
+        .collect()
+}
+```
 
-| Function | Purpose |
-|----------|---------|
-| `switch_session(name)` | Switch to existing session |
-| `switch_session_with_cwd(name, cwd)` | Create + switch to session with working directory |
-| `kill_sessions(names)` | Kill session from sidebar |
-| `hide_self()` | Toggle sidebar hidden |
-| `show_self()` | Toggle sidebar visible |
-| `request_permission(&[...])` | Request ReadApplicationState + ChangeApplicationState on load |
-| `subscribe(&[...])` | Subscribe to SessionUpdate, Key, PaneUpdate events |
+**Challenge: Mapping ports to projects.** lsof shows system-wide ports. We need to filter to processes owned by each Zellij session. Two approaches:
 
-### SessionInfo Fields (from `SessionUpdate` event)
+| Approach | How | Complexity | Accuracy |
+|----------|-----|------------|----------|
+| **A: Session CWD matching** | Run `lsof` once globally, then match process CWDs against project paths using `/proc` (Linux) or additional lsof calls | HIGH | MEDIUM |
+| **B: Single global list** | Run `lsof` once, show ALL listening ports grouped as a global info section (not per-project) | LOW | LOW (but useful) |
+| **C: Per-project lsof with CWD** | Run `lsof +D /project/path` per project | HIGH (slow) | LOW (doesn't catch processes that cd away) |
+| **D: Skip per-project, show session-level** | Only detect ports for the currently active session by inspecting process tree | MEDIUM | MEDIUM |
 
-| Field | Type | Use |
-|-------|------|-----|
-| `name` | `String` | Session name display |
-| `tabs` | `Vec<TabInfo>` | Tab count per session |
-| `panes` | `PaneManifest` | Pane info including active command |
-| `is_current_session` | `bool` | Highlight active session |
-| `connected_clients` | `usize` | Show if other clients are connected |
+**Recommendation: Approach B (global port list) for v1.1, with a view toward Approach A in a future version.** Per-project port mapping is genuinely hard because processes don't necessarily stay in their initial CWD. A global "listening ports" indicator keeps scope manageable.
 
-### Rendering Primitives
-
-| Component | Use Case |
-|-----------|----------|
-| `Text::new()` with `.color_range()` and `.selected()` | Session name with status indicator, highlight selected row |
-| `print_text_with_coordinates(text, x, y, w, h)` | Position elements in the sidebar |
-| `NestedList` with `.indent()` and `.selected()` | Session list with optional tab sub-items |
-| `Table` with `.add_row()` | Structured display if needed (likely overkill for sidebar) |
-
-Color indices 0-3 map to theme colors automatically (Catppuccin Frappe will apply correctly).
-
-## Setup Commands
+However, an even better approach: **skip automatic port detection for v1.1 and use pipe messages instead.** Just as attention is signaled via pipes, a dev tool or shell hook can signal ports:
 
 ```bash
-# 1. Add WASM target (one-time)
-rustup target add wasm32-wasip1
-
-# 2. Build (debug, for development)
-cargo build
-
-# 3. Build (release, for distribution)
-cargo build --release
-
-# 4. Load into running Zellij session (debug)
-zellij action start-or-reload-plugin file:target/wasm32-wasip1/debug/zellij-project-sidebar.wasm
-
-# 5. Load into running Zellij session (release)
-zellij action start-or-reload-plugin file:target/wasm32-wasip1/release/zellij-project-sidebar.wasm
-
-# 6. Development with hot reload (use dev layout)
-zellij -l zellij.kdl
+# Shell hook (in .zshrc or project-specific):
+zellij pipe "sidebar::ports::my-project" -- "3000,8080"
 ```
+
+This is more reliable, more extensible, and zero CPU cost vs polling lsof every 10 seconds. It also avoids platform-specific commands.
+
+**Pragmatic recommendation:** Implement BOTH. Auto-detect via lsof as a convenience (show ports in a global section or skip), and support pipe-based port reporting for accuracy. Start with pipe-based in v1.1, add lsof auto-detect as an enhancement.
+
+**Polling interval:** If using lsof, 15-30 seconds is fine. Port changes are rare events.
+
+### 3. Status Pills via Pipe Messages
+
+**No new API needed.** The existing pipe system handles this perfectly. The plugin already processes pipe messages with prefix-based routing (`sidebar::attention::`, `sidebar::clear::`).
+
+**Protocol extension:**
+
+```
+# Set a pill (key-value metadata displayed on card)
+zellij pipe "sidebar::pill::SESSION_NAME::KEY" -- "VALUE"
+
+# Clear a pill
+zellij pipe "sidebar::pill::SESSION_NAME::KEY" -- ""
+
+# Examples:
+zellij pipe "sidebar::pill::my-project::env" -- "staging"
+zellij pipe "sidebar::pill::my-project::status" -- "deploying"
+zellij pipe "sidebar::pill::my-project::ports" -- "3000,8080"
+```
+
+**Data model addition:**
+
+```rust
+struct Project {
+    name: String,
+    path: String,
+    status: SessionStatus,
+    // v1.1 additions:
+    git_branch: Option<String>,
+    pills: BTreeMap<String, String>,  // key -> value
+    progress: Option<u8>,             // 0-100
+}
+```
+
+**Rendering:** Pills are small colored badges. Use `color_range` with different color indices per pill type. Convention: use the pipe message key to determine color (e.g., "env" = blue, "status" = yellow).
+
+**No new crates.** String splitting on `::` separators is trivial with stdlib.
+
+### 4. Progress Bar via Pipe Messages
+
+**Protocol:**
+
+```
+# Set progress (0-100)
+zellij pipe "sidebar::progress::SESSION_NAME" -- "75"
+
+# Clear progress
+zellij pipe "sidebar::progress::SESSION_NAME" -- ""
+```
+
+**Rendering:** Character-cell progress bar using block characters:
+
+```rust
+fn render_progress_bar(progress: u8, width: usize) -> String {
+    let filled = (progress as usize * width) / 100;
+    let empty = width - filled;
+    format!("{}{}", "█".repeat(filled), "░".repeat(empty))
+}
+```
+
+Width is constrained by sidebar column count. A typical 20-char sidebar gives ~16 chars for the bar (after padding). Use `color_range` to color the filled portion green and empty portion gray.
+
+**No new crates.** Unicode block characters are stdlib strings.
+
+### 5. Multi-Line Card Layout
+
+**No new API.** Uses existing `print_text_with_coordinates(text, x, y, Some(cols), None)` with different y-offsets per line of each card.
+
+**Card layout (3 lines per project at full verbosity):**
+
+```
+Line 1: ● project-name [3]           ← name + status dot + tab count
+Line 2:   main  :3000 :8080          ← branch + ports
+Line 3:   [env:staging] [deploying]   ← pills
+```
+
+**At minimal verbosity:** Single line (current behavior).
+**At full verbosity:** 2-3 lines depending on available metadata.
+
+The `RenderLine` enum needs extension:
+
+```rust
+enum RenderLine {
+    Header(String),
+    ProjectRow(usize),
+    // v1.1 additions:
+    ProjectDetail(usize),    // branch + ports line
+    ProjectPills(usize),     // pills + progress line
+}
+```
+
+## What NOT to Add
+
+| Crate | Why Not |
+|-------|---------|
+| `regex` | All parsing is simple enough for `str::split`, `str::rsplit`, `str::parse`. Adding regex bloats WASM binary (~100KB+). |
+| `chrono` | No time formatting needed. `set_timeout` uses `f64` seconds. |
+| `git2` / `libgit2-sys` | Cannot compile to wasm32-wasip1. Uses C FFI. Shell out to `git` CLI instead. |
+| `nix` / `libc` (for port detection) | WASM sandbox has no direct syscall access. Shell out to `lsof` instead. |
+| `tokio` / `async-std` | WASM plugins are single-threaded. Use `set_timeout` + `run_command` (async by design). |
+| `serde_json` | Pills/progress use simple string values, not JSON. Pipe message payload is already a string. |
+
+## Permissions Update
+
+v1.1 requires `RunCommands` permission for ALL modes (not just discovery mode). Currently, it's only requested in discovery mode.
+
+**Change in `load()`:**
+
+```rust
+// Before (v1.0):
+let mut permissions = vec![
+    PermissionType::ReadApplicationState,
+    PermissionType::ChangeApplicationState,
+    PermissionType::Reconfigure,
+];
+if self.use_discovery {
+    permissions.push(PermissionType::RunCommands);
+}
+
+// After (v1.1):
+let permissions = vec![
+    PermissionType::ReadApplicationState,
+    PermissionType::ChangeApplicationState,
+    PermissionType::Reconfigure,
+    PermissionType::RunCommands, // Always needed now for git/port detection
+];
+```
+
+**Impact:** Users in legacy (non-discovery) mode will see the permissions dialog again on first load after upgrade. This is a one-time prompt.
+
+## Event Subscription Update
+
+v1.1 requires subscribing to `EventType::Timer` and `EventType::RunCommandResult` in ALL modes.
+
+**Change in `load()`:**
+
+```rust
+// Before (v1.0):
+let mut events = vec![
+    EventType::SessionUpdate,
+    EventType::PermissionRequestResult,
+    EventType::Key,
+    EventType::Mouse,
+];
+if self.use_discovery {
+    events.push(EventType::RunCommandResult);
+}
+
+// After (v1.1):
+let events = vec![
+    EventType::SessionUpdate,
+    EventType::PermissionRequestResult,
+    EventType::Key,
+    EventType::Mouse,
+    EventType::RunCommandResult, // Always needed for git/port commands
+    EventType::Timer,            // For periodic polling
+];
+```
+
+## Configuration Additions
+
+New KDL config keys for v1.1:
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
+| `poll_interval` | String (seconds) | `"10"` | How often to poll git branches and ports |
+| `show_git_branch` | String ("true"/"false") | `"true"` | Enable/disable git branch display |
+| `show_ports` | String ("true"/"false") | `"false"` | Enable/disable auto port detection (lsof) |
+
+**Note:** All KDL plugin config values are strings. Parse in `load()` with `.parse::<f64>()` for the interval.
+
+## Timer Architecture
+
+### Poll Scheduling
+
+```
+load() -> permissions granted -> set_timeout(1.0) [initial delay]
+         |
+         v
+Timer fires -> poll_git_branches() [fire N run_commands]
+            -> poll_ports() [fire 1 run_command if enabled]
+            -> set_timeout(poll_interval) [rearm]
+         |
+         v
+RunCommandResult -> update project state -> return true (re-render)
+```
+
+**Key insight:** `run_command` is asynchronous. Firing 20 git commands at once is fine -- they run on the host concurrently and results arrive as individual `RunCommandResult` events. The context map (`BTreeMap<String, String>`) tracks which command belongs to which project.
+
+### Command Multiplexing
+
+The existing `CMD_KEY`/`CMD_SCAN_DIR` pattern extends naturally:
+
+```rust
+const CMD_SCAN_DIR: &str = "scan_dir";
+const CMD_GIT_BRANCH: &str = "git_branch";
+const CMD_PORTS: &str = "ports";
+
+// In RunCommandResult handler:
+match context.get("cmd").map(|s| s.as_str()) {
+    Some("scan_dir") => { /* existing */ }
+    Some("git_branch") => { /* parse branch, store in project */ }
+    Some("ports") => { /* parse lsof output, store ports */ }
+    _ => false,
+}
+```
+
+## Summary: Dependency Delta
+
+| v1.0 Cargo.toml | v1.1 Cargo.toml | Change |
+|------------------|------------------|--------|
+| `zellij-tile = "0.43.1"` | `zellij-tile = "0.43.1"` | No change |
+| `serde = { version = "1.0", features = ["derive"] }` | `serde = { version = "1.0", features = ["derive"] }` | No change |
+| | | **Zero new dependencies** |
+
+The entire v1.1 feature set ships with zero new crates. All capabilities come from:
+- zellij-tile API: `set_timeout`, `run_command_with_env_variables_and_cwd`, `Event::Timer`
+- Rust stdlib: `String` parsing, `BTreeMap`, `PathBuf`
+- Existing patterns: pipe messages, `color_range` rendering, context-based command routing
 
 ## Sources
 
-- [Zellij Rust Plugin Tutorial](https://zellij.dev/tutorials/developing-a-rust-plugin/) - Official tutorial, verified 2026-03-11
-- [zellij-tile 0.43.1 docs.rs](https://docs.rs/zellij-tile/latest/zellij_tile/) - API reference
-- [zellij-tile shim (commands)](https://docs.rs/zellij-tile/latest/zellij_tile/shim/index.html) - All plugin commands
-- [Plugin API Events](https://zellij.dev/documentation/plugin-api-events.html) - Event types
-- [Plugin API Commands](https://zellij.dev/documentation/plugin-api-commands.html) - Command reference
-- [Plugin API Permissions](https://zellij.dev/documentation/plugin-api-permissions) - Permission types
-- [Plugin UI Rendering](https://zellij.dev/documentation/plugin-ui-rendering.html) - Text, Table, NestedList, Ribbon
-- [Plugin Loading](https://zellij.dev/documentation/plugin-loading) - URL schemas, layout loading
-- [Creating Layouts](https://zellij.dev/documentation/creating-a-layout.html) - KDL layout syntax, pane sizing
-- [Plugin Dev Environment](https://zellij.dev/documentation/plugin-dev-env.html) - Hot reload setup
-- [rust-plugin-example](https://github.com/zellij-org/rust-plugin-example) - Official example, Cargo.toml reference
-- [zjstatus Cargo.toml](https://github.com/dj95/zjstatus) - Community plugin using zellij-tile 0.43.1, edition 2024
-- [zellij-sessionizer](https://github.com/cunialino/zellij-sessionizer) - Session-switching plugin, minimal deps
-- [Rust WASI target rename](https://blog.rust-lang.org/2024/04/09/updates-to-rusts-wasi-targets/) - wasm32-wasi to wasm32-wasip1
-- [SessionInfo struct](https://docs.rs/zellij-tile/latest/zellij_tile/prelude/struct.SessionInfo.html) - Session data fields
+- [zellij-tile 0.43.1 shim.rs](https://docs.rs/zellij-tile/0.43.1/zellij_tile/shim/) - `set_timeout` (line 305), `run_command_with_env_variables_and_cwd` (line 337). Verified by reading source directly from `~/.cargo/registry/src`.
+- [zellij-utils 0.43.1 data.rs](https://docs.rs/zellij-tile/0.43.1/zellij_tile/prelude/enum.Event.html) - `Event::Timer(f64)` (line 891), `EventType` discriminant. Verified by reading source directly.
+- [Plugin API Commands](https://zellij.dev/documentation/plugin-api-commands) - `set_timeout` and `run_command` official documentation.
+- [Plugin API Events](https://zellij.dev/documentation/plugin-api-events.html) - Timer and RunCommandResult event documentation.
+- [zjstatus](https://github.com/dj95/zjstatus) - Community statusbar plugin using `git rev-parse --abbrev-ref HEAD` with 10-second interval. Validates the timer + run_command polling pattern.
+- [lsof macOS usage](https://til.simonwillison.net/macos/lsof-macos) - `lsof -nP -iTCP -sTCP:LISTEN` for port detection on macOS. Verified locally: ~69ms execution time.
