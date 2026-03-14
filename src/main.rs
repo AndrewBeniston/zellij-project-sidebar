@@ -581,6 +581,11 @@ layout {
                 {
                     parts.push_str(&format!(" {}", cmd));
                 }
+                // Show git branch for running sessions
+                if let Some(ref branch) = project.metadata.git_branch {
+                    let display_branch = if branch == "HEAD" { "detached" } else { branch.as_str() };
+                    parts.push_str(&format!("  {}", display_branch));
+                }
                 parts
             }
         };
@@ -640,6 +645,19 @@ layout {
                             text = text.color_range(COLOR_BLUE, cmd_start..actual_end);
                         }
                     }
+                }
+            }
+
+            // Color git branch text in blue (dim) for non-current sessions
+            if let Some(ref branch) = project.metadata.git_branch {
+                let display_branch = if branch == "HEAD" { "detached" } else { branch.as_str() };
+                let branch_display = format!("  {}", display_branch);
+                let branch_char_len = branch_display.chars().count();
+                let line_len = display_line.chars().count();
+                // Branch is at the end of the line
+                if line_len >= branch_char_len {
+                    let branch_start = line_len - branch_char_len;
+                    text = text.color_range(COLOR_BLUE, branch_start..line_len);
                 }
             }
         }
