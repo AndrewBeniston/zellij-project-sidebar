@@ -704,7 +704,7 @@ layout {
         let ai_state = self.ai_states.get(&project.name);
         if ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown)) {
             let count = self.ai_pane_count.get(&project.name).copied().unwrap_or(0);
-            let prefix = if count > 1 { format!("{} x claude", count) } else { "claude".to_string() };
+            let prefix = if count > 1 { format!("claude x{}", count) } else { "claude".to_string() };
             let label = if matches!(ai_state, Some(AgentState::Active)) {
                 let elapsed = self.format_elapsed(&project.name);
                 if elapsed.is_empty() { prefix } else { format!("{} · {}", prefix, elapsed) }
