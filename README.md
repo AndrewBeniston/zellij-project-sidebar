@@ -203,17 +203,15 @@ zellij pipe --name "sidebar::ai-active::$ZELLIJ_SESSION_NAME"
 
 ## Reloading the plugin
 
-After rebuilding, you can reload the plugin in a single session via the Zellij plugin manager: **Ctrl+O, P**, select the sidebar, then press Enter to reload.
-
-### Reload across all sessions
-
-A convenience script is included to reload the plugin in every active session at once:
+A build script handles compiling and installing:
 
 ```bash
 ./scripts/reload-all.sh
 ```
 
-> **Known issue:** Zellij's `start-or-reload-plugin` CLI command may spawn a duplicate plugin pane in each session instead of reloading the existing one. If this happens, open the plugin manager (**Ctrl+O, P**), select the duplicate (it will show "No projects configured"), and press **Delete** (Fn+Backspace on Mac) to remove it. The original sidebar will continue working.
+After installing, reload the plugin in each session via the Zellij plugin manager: **Ctrl+O, P**, select the sidebar, then press **Enter** to reload. The sidebar's snapshot restore ensures projects appear instantly on reload with no blank flash.
+
+> **Note:** There is no Zellij CLI command to reload a layout-loaded plugin in-place. The manual Ctrl+O, P approach is the only reliable method.
 
 ## Pairs well with
 

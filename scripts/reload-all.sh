@@ -1,11 +1,20 @@
 #!/bin/bash
-# reload-all.sh — Reload the sidebar plugin across ALL active Zellij sessions
-PLUGIN_URL="file:$HOME/.config/zellij/plugins/zellij-project-sidebar.wasm"
-CONFIG='scan_dir "/Users/andrewbeniston/Documents/01-Projects/Git",pin_file "/Users/andrewbeniston/.config/zellij/pinned-projects.json",session_layout "/Users/andrewbeniston/.config/zellij/layouts/clean.kdl"'
+# reload-all.sh — Rebuild and install the sidebar plugin
+#
+# NOTE: There is no CLI command to reload an existing layout-loaded plugin.
+# After running this script, reload manually in each session:
+#   Ctrl+O, P → select the sidebar → Enter
+#
+# The sidebar's snapshot restore ensures minimal flash on reload.
 
-for session in $(zellij list-sessions 2>&1 | grep -v EXITED | sed 's/\x1b\[[0-9;]*m//g' | awk '{print $1}'); do
-  echo "Reloading in: $session"
-  zellij --session "$session" action start-or-reload-plugin "$PLUGIN_URL" -c "$CONFIG" 2>&1 &
-done
-wait
-echo "Done — all sessions reloaded"
+set -e
+
+echo "Building release..."
+cargo build --release --target wasm32-wasip1
+
+echo "Installing..."
+cp target/wasm32-wasip1/release/zellij-project-sidebar.wasm ~/.config/zellij/plugins/zellij-project-sidebar.wasm
+
+echo ""
+echo "Installed. Reload the plugin in each session:"
+echo "  Ctrl+O, P → select sidebar → Enter"
