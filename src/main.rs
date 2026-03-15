@@ -1343,14 +1343,8 @@ impl ZellijPlugin for State {
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
-        if !self.permissions_granted {
-            println!("Waiting for permissions...");
-            return;
-        }
-
-
-        if !self.initial_load_complete {
-            return; // Render nothing until first SessionUpdate arrives
+        if !self.permissions_granted && !self.initial_load_complete {
+            return; // No permissions yet AND no snapshot — render nothing
         }
 
         if self.projects.is_empty() {
