@@ -11,10 +11,11 @@ use std::time::Duration;
 //   2 = emphasis_2 (typically red)
 //   3 = emphasis_3 (typically yellow/orange)
 
-const COLOR_GREEN: usize = 0;
+// Zellij Text palette: 0=orange, 1=cyan, 2=green, 3=magenta
+const COLOR_ORANGE: usize = 0;
 const COLOR_CYAN: usize = 1;
-const COLOR_RED: usize = 2;
-const COLOR_YELLOW: usize = 3;
+const COLOR_GREEN: usize = 2;
+const COLOR_MAGENTA: usize = 3;
 
 const CMD_KEY: &str = "cmd";
 const CMD_SCAN_DIR: &str = "scan_dir";
@@ -638,19 +639,13 @@ layout {
         // Determine icon + color based on state priority
         let ai_state = self.ai_states.get(&project.name);
         let (status_icon, dot_color) = if needs_attention {
-            ("◆", COLOR_RED)        // filled diamond = needs attention NOW
-        } else if is_current_session {
-            ("✦", COLOR_GREEN)      // sparkle = AI/current
+            ("!", COLOR_MAGENTA)      // ! = needs attention (magenta)
         } else {
             match ai_state {
-                Some(AgentState::Active) => ("✦", COLOR_GREEN),   // sparkle = Claude working
-                Some(AgentState::Waiting) => ("◇", COLOR_YELLOW),  // hollow diamond = needs input
-                Some(AgentState::Idle) => ("○", COLOR_CYAN),       // hollow circle = done, your turn
-                _ => match &project.status {
-                    SessionStatus::Running { .. } => ("●", COLOR_GREEN),
-                    SessionStatus::Exited => ("●", COLOR_YELLOW),
-                    SessionStatus::NotStarted => ("○", COLOR_CYAN),
-                },
+                Some(AgentState::Active) => ("▶", COLOR_GREEN),    // ▶ = Claude working (green)
+                Some(AgentState::Waiting) | Some(AgentState::Idle) =>
+                    ("■", COLOR_CYAN),                             // ■ = Claude stopped (cyan)
+                _ => ("·", COLOR_ORANGE),                          // · = no AI state
             }
         };
 
@@ -673,8 +668,9 @@ layout {
         let line_len = display_line.chars().count();
 
         // First color wins per character — apply most specific first
-        // Icon color (char 2)
-        text = text.color_range(dot_color, 2..3);
+        // Icon color (starts at char 2, length varies: "▶"=1, "??"=2, "!!"=2)
+        let icon_end = 2 + status_icon.chars().count();
+        text = text.color_range(dot_color, 2..icon_end);
         // Borders (cyan to match Zellij frame)
         text = text.color_range(COLOR_CYAN, 0..1);
         text = text.color_range(COLOR_CYAN, line_len.saturating_sub(1)..line_len);
@@ -701,16 +697,15 @@ layout {
         // Claude indicator — show for ANY session with AI state (not just current)
         let ai_state = self.ai_states.get(&project.name);
         if ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown)) {
-            let label = match ai_state.unwrap() {
-                AgentState::Active => "claude ●",
-                AgentState::Idle => "claude ○",
-                AgentState::Waiting => "claude ◇",
-                AgentState::Unknown => unreachable!(),
+            let label = "claude";
+            let detail_color = match ai_state.unwrap() {
+                AgentState::Active => COLOR_GREEN,
+                _ => COLOR_CYAN,
             };
             let start = content.chars().count() + 1; // +1 for left │
             content.push_str(label);
             let end = content.chars().count() + 1;
-            segments.push((start, end, COLOR_GREEN));
+            segments.push((start, end, detail_color));
             has_content = true;
         } else if let SessionStatus::Running { active_command: Some(cmd), .. } = &project.status {
             // Fallback: show active_command from Zellij API (any session)
@@ -718,7 +713,7 @@ layout {
             let start = content.chars().count() + 1;
             content.push_str(cmd);
             let end = content.chars().count() + 1;
-            segments.push((start, end, COLOR_GREEN));
+            segments.push((start, end, COLOR_ORANGE));
             has_content = true;
         }
 
@@ -788,28 +783,35 @@ layout {
     }
 
     fn save_ai_states(&self) {
-        match serde_json::to_string(&self.ai_states) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write("/cache/agent_state.json", json) {
-                    eprintln!("Failed to write ai_states cache: {}", e);
-                }
-            }
-            Err(e) => eprintln!("Failed to serialize ai_states: {}", e),
+        // Write per-session files for cross-session visibility
+        let _ = std::fs::create_dir_all("/tmp/sidebar-ai");
+        for (session, state) in &self.ai_states {
+            let state_str = match state {
+                AgentState::Active => "active",
+                AgentState::Idle => "idle",
+                AgentState::Waiting => "waiting",
+                AgentState::Unknown => "unknown",
+            };
+            let _ = std::fs::write(format!("/tmp/sidebar-ai/{}", session), state_str);
         }
     }
 
     fn load_ai_states(&mut self) {
-        match std::fs::read_to_string("/cache/agent_state.json") {
-            Ok(data) => {
-                match serde_json::from_str::<BTreeMap<String, AgentState>>(&data) {
-                    Ok(states) => {
-                        self.ai_states = states;
-                        eprintln!("Loaded {} ai_states from cache", self.ai_states.len());
+        // Read per-session files from shared dir
+        if let Ok(entries) = std::fs::read_dir("/tmp/sidebar-ai") {
+            for entry in entries.flatten() {
+                if let Some(session) = entry.file_name().to_str().map(|s| s.to_string()) {
+                    if let Ok(data) = std::fs::read_to_string(entry.path()) {
+                        let state = match data.trim() {
+                            "active" => AgentState::Active,
+                            "idle" => AgentState::Idle,
+                            "waiting" => AgentState::Waiting,
+                            _ => continue,
+                        };
+                        self.ai_states.insert(session, state);
                     }
-                    Err(e) => eprintln!("Failed to parse ai_states cache: {}", e),
                 }
             }
-            Err(_) => {} // File doesn't exist yet — normal on first load
         }
     }
 }
@@ -1177,12 +1179,7 @@ impl ZellijPlugin for State {
 
 
         if !self.initial_load_complete {
-            if self.use_discovery {
-                println!("Scanning...");
-            } else {
-                println!("Loading...");
-            }
-            return;
+            return; // Render nothing until first SessionUpdate arrives
         }
 
         if self.projects.is_empty() {
