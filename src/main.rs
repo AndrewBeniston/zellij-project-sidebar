@@ -1380,12 +1380,10 @@ impl ZellijPlugin for State {
 
         // Empty states
         if render_lines.is_empty() {
-            let msg = if self.browse_mode {
-                " No matches"
-            } else {
-                " No active sessions"
-            };
-            let text = Text::new(msg).color_all(COLOR_CYAN);
+            if !self.browse_mode {
+                return; // Render nothing — sessions will appear on next SessionUpdate
+            }
+            let text = Text::new(" No matches").color_all(COLOR_CYAN);
             print_text_with_coordinates(text, 0, y_offset, Some(cols), None);
 
             // Still show footer with hint
