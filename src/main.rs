@@ -146,6 +146,7 @@ struct State {
     // AI state — stored separately so SessionUpdate never wipes it
     ai_states: BTreeMap<String, AgentState>,
     ai_state_since: BTreeMap<String, u64>, // unix timestamp when state started
+    ai_last_duration: BTreeMap<String, u64>, // seconds the last active turn lasted
 }
 
 impl Default for State {
@@ -175,6 +176,7 @@ impl Default for State {
             poll_tick: 0,
             ai_states: BTreeMap::new(),
             ai_state_since: BTreeMap::new(),
+            ai_last_duration: BTreeMap::new(),
         }
     }
 }
@@ -699,11 +701,14 @@ layout {
         // Claude indicator — show for ANY session with AI state (not just current)
         let ai_state = self.ai_states.get(&project.name);
         if ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown)) {
-            let elapsed = self.format_elapsed(&project.name);
-            let label = if elapsed.is_empty() {
-                "claude".to_string()
+            let label = if matches!(ai_state, Some(AgentState::Active)) {
+                // Active: show live counting timer
+                let elapsed = self.format_elapsed(&project.name);
+                if elapsed.is_empty() { "claude".to_string() } else { format!("claude · {}", elapsed) }
             } else {
-                format!("claude · {}", elapsed)
+                // Idle/waiting: show how long the last turn took
+                let dur = self.format_last_duration(&project.name);
+                if dur.is_empty() { "claude".to_string() } else { format!("claude · took {}", dur) }
             };
             let detail_color = match ai_state.unwrap() {
                 AgentState::Active => COLOR_GREEN,
@@ -796,12 +801,14 @@ layout {
     }
 
     fn load_ai_states(&mut self) {
-        // Read per-session files: format is "state timestamp" (e.g. "active 1710460800")
+        // Read per-session files: "state timestamp [duration]"
+        // Active: "active 1710460800"
+        // Idle:   "idle 1710460830 30" (30 = seconds the active turn lasted)
         if let Ok(entries) = std::fs::read_dir("/tmp/sidebar-ai") {
             for entry in entries.flatten() {
                 if let Some(session) = entry.file_name().to_str().map(|s| s.to_string()) {
                     if let Ok(data) = std::fs::read_to_string(entry.path()) {
-                        let parts: Vec<&str> = data.trim().splitn(2, ' ').collect();
+                        let parts: Vec<&str> = data.trim().split(' ').collect();
                         let state = match parts.first().copied() {
                             Some("active") => AgentState::Active,
                             Some("idle") => AgentState::Idle,
@@ -811,7 +818,14 @@ layout {
                         self.ai_states.insert(session.clone(), state);
                         if let Some(ts_str) = parts.get(1) {
                             if let Ok(ts) = ts_str.parse::<u64>() {
-                                self.ai_state_since.insert(session, ts);
+                                self.ai_state_since.insert(session.clone(), ts);
+                            }
+                        }
+                        if let Some(dur_str) = parts.get(2) {
+                            if let Ok(dur) = dur_str.parse::<u64>() {
+                                if dur > 0 {
+                                    self.ai_last_duration.insert(session.clone(), dur);
+                                }
                             }
                         }
                     }
@@ -830,15 +844,27 @@ layout {
     fn format_elapsed(&self, session: &str) -> String {
         if let Some(&since) = self.ai_state_since.get(session) {
             let elapsed = self.now_secs().saturating_sub(since);
-            if elapsed < 60 {
-                format!("{}s", elapsed)
-            } else if elapsed < 3600 {
-                format!("{}m", elapsed / 60)
-            } else {
-                format!("{}h", elapsed / 3600)
-            }
+            Self::format_duration(elapsed)
         } else {
             String::new()
+        }
+    }
+
+    fn format_last_duration(&self, session: &str) -> String {
+        if let Some(&dur) = self.ai_last_duration.get(session) {
+            Self::format_duration(dur)
+        } else {
+            String::new()
+        }
+    }
+
+    fn format_duration(secs: u64) -> String {
+        if secs < 60 {
+            format!("{}s", secs)
+        } else if secs < 3600 {
+            format!("{}m", secs / 60)
+        } else {
+            format!("{}h", secs / 3600)
         }
     }
 }
