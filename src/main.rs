@@ -145,6 +145,7 @@ struct State {
 
     // AI state — stored separately so SessionUpdate never wipes it
     ai_states: BTreeMap<String, AgentState>,
+    ai_state_since: BTreeMap<String, u64>, // unix timestamp when state started
 }
 
 impl Default for State {
@@ -173,6 +174,7 @@ impl Default for State {
             pending_commands: 0,
             poll_tick: 0,
             ai_states: BTreeMap::new(),
+            ai_state_since: BTreeMap::new(),
         }
     }
 }
@@ -697,13 +699,18 @@ layout {
         // Claude indicator — show for ANY session with AI state (not just current)
         let ai_state = self.ai_states.get(&project.name);
         if ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown)) {
-            let label = "claude";
+            let elapsed = self.format_elapsed(&project.name);
+            let label = if elapsed.is_empty() {
+                "claude".to_string()
+            } else {
+                format!("claude · {}", elapsed)
+            };
             let detail_color = match ai_state.unwrap() {
                 AgentState::Active => COLOR_GREEN,
                 _ => COLOR_CYAN,
             };
             let start = content.chars().count() + 1; // +1 for left │
-            content.push_str(label);
+            content.push_str(&label);
             let end = content.chars().count() + 1;
             segments.push((start, end, detail_color));
             has_content = true;
@@ -792,26 +799,55 @@ layout {
                 AgentState::Waiting => "waiting",
                 AgentState::Unknown => "unknown",
             };
-            let _ = std::fs::write(format!("/tmp/sidebar-ai/{}", session), state_str);
+            let ts = self.ai_state_since.get(session).copied().unwrap_or(0);
+            let _ = std::fs::write(format!("/tmp/sidebar-ai/{}", session), format!("{} {}", state_str, ts));
         }
     }
 
     fn load_ai_states(&mut self) {
-        // Read per-session files from shared dir
+        // Read per-session files: format is "state timestamp" (e.g. "active 1710460800")
         if let Ok(entries) = std::fs::read_dir("/tmp/sidebar-ai") {
             for entry in entries.flatten() {
                 if let Some(session) = entry.file_name().to_str().map(|s| s.to_string()) {
                     if let Ok(data) = std::fs::read_to_string(entry.path()) {
-                        let state = match data.trim() {
-                            "active" => AgentState::Active,
-                            "idle" => AgentState::Idle,
-                            "waiting" => AgentState::Waiting,
+                        let parts: Vec<&str> = data.trim().splitn(2, ' ').collect();
+                        let state = match parts.first().copied() {
+                            Some("active") => AgentState::Active,
+                            Some("idle") => AgentState::Idle,
+                            Some("waiting") => AgentState::Waiting,
                             _ => continue,
                         };
-                        self.ai_states.insert(session, state);
+                        self.ai_states.insert(session.clone(), state);
+                        if let Some(ts_str) = parts.get(1) {
+                            if let Ok(ts) = ts_str.parse::<u64>() {
+                                self.ai_state_since.insert(session, ts);
+                            }
+                        }
                     }
                 }
             }
+        }
+    }
+
+    fn now_secs(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
+    fn format_elapsed(&self, session: &str) -> String {
+        if let Some(&since) = self.ai_state_since.get(session) {
+            let elapsed = self.now_secs().saturating_sub(since);
+            if elapsed < 60 {
+                format!("{}s", elapsed)
+            } else if elapsed < 3600 {
+                format!("{}m", elapsed / 60)
+            } else {
+                format!("{}h", elapsed / 3600)
+            }
+        } else {
+            String::new()
         }
     }
 }
@@ -1353,6 +1389,10 @@ impl ZellijPlugin for State {
             name if name.starts_with("sidebar::ai-active::") => {
                 let session = name.strip_prefix("sidebar::ai-active::").unwrap_or("").to_string();
                 if !session.is_empty() {
+                    // Only reset timestamp if transitioning TO active
+                    if !matches!(self.ai_states.get(&session), Some(AgentState::Active)) {
+                        self.ai_state_since.insert(session.clone(), self.now_secs());
+                    }
                     self.ai_states.insert(session, AgentState::Active);
                     self.save_ai_states();
                 }
@@ -1361,6 +1401,7 @@ impl ZellijPlugin for State {
             name if name.starts_with("sidebar::ai-idle::") => {
                 let session = name.strip_prefix("sidebar::ai-idle::").unwrap_or("").to_string();
                 if !session.is_empty() {
+                    self.ai_state_since.insert(session.clone(), self.now_secs());
                     self.ai_states.insert(session, AgentState::Idle);
                     self.save_ai_states();
                 }
@@ -1369,6 +1410,7 @@ impl ZellijPlugin for State {
             name if name.starts_with("sidebar::ai-waiting::") => {
                 let session = name.strip_prefix("sidebar::ai-waiting::").unwrap_or("").to_string();
                 if !session.is_empty() {
+                    self.ai_state_since.insert(session.clone(), self.now_secs());
                     self.ai_states.insert(session, AgentState::Waiting);
                     self.save_ai_states();
                 }
