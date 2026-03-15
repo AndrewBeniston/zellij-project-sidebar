@@ -147,6 +147,7 @@ struct State {
     ai_states: BTreeMap<String, AgentState>,
     ai_state_since: BTreeMap<String, u64>, // unix timestamp when state started
     ai_last_duration: BTreeMap<String, u64>, // seconds the last active turn lasted
+    ai_pane_count: BTreeMap<String, usize>,  // number of active AI panes per session
 }
 
 impl Default for State {
@@ -177,6 +178,7 @@ impl Default for State {
             ai_states: BTreeMap::new(),
             ai_state_since: BTreeMap::new(),
             ai_last_duration: BTreeMap::new(),
+            ai_pane_count: BTreeMap::new(),
         }
     }
 }
@@ -701,14 +703,14 @@ layout {
         // Claude indicator — show for ANY session with AI state (not just current)
         let ai_state = self.ai_states.get(&project.name);
         if ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown)) {
+            let count = self.ai_pane_count.get(&project.name).copied().unwrap_or(0);
+            let prefix = if count > 1 { format!("{} x claude", count) } else { "claude".to_string() };
             let label = if matches!(ai_state, Some(AgentState::Active)) {
-                // Active: show live counting timer
                 let elapsed = self.format_elapsed(&project.name);
-                if elapsed.is_empty() { "claude".to_string() } else { format!("claude · {}", elapsed) }
+                if elapsed.is_empty() { prefix } else { format!("{} · {}", prefix, elapsed) }
             } else {
-                // Idle/waiting: show how long the last turn took
                 let dur = self.format_last_duration(&project.name);
-                if dur.is_empty() { "claude".to_string() } else { format!("claude · took {}", dur) }
+                if dur.is_empty() { prefix } else { format!("{} · took {}", prefix, dur) }
             };
             let detail_color = match ai_state.unwrap() {
                 AgentState::Active => COLOR_GREEN,
@@ -801,34 +803,100 @@ layout {
     }
 
     fn load_ai_states(&mut self) {
-        // Read per-session files: "state timestamp [duration]"
-        // Active: "active 1710460800"
-        // Idle:   "idle 1710460830 30" (30 = seconds the active turn lasted)
-        if let Ok(entries) = std::fs::read_dir("/tmp/sidebar-ai") {
-            for entry in entries.flatten() {
-                if let Some(session) = entry.file_name().to_str().map(|s| s.to_string()) {
-                    if let Ok(data) = std::fs::read_to_string(entry.path()) {
-                        let parts: Vec<&str> = data.trim().split(' ').collect();
-                        let state = match parts.first().copied() {
-                            Some("active") => AgentState::Active,
-                            Some("idle") => AgentState::Idle,
-                            Some("waiting") => AgentState::Waiting,
-                            _ => continue,
-                        };
-                        self.ai_states.insert(session.clone(), state);
-                        if let Some(ts_str) = parts.get(1) {
-                            if let Ok(ts) = ts_str.parse::<u64>() {
-                                self.ai_state_since.insert(session.clone(), ts);
+        // Read per-pane files: /tmp/sidebar-ai/<session>/<pane_id>
+        // Each file: "state timestamp [duration]"
+        // Aggregate per session: hottest state wins, count active panes
+        if let Ok(sessions) = std::fs::read_dir("/tmp/sidebar-ai") {
+            for session_entry in sessions.flatten() {
+                let session = match session_entry.file_name().to_str().map(|s| s.to_string()) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let path = session_entry.path();
+
+                // Handle both old format (session is a file) and new format (session is a dir)
+                if path.is_file() {
+                    self.load_ai_state_from_file(&session, &path);
+                    continue;
+                }
+                if !path.is_dir() { continue; }
+
+                let mut best_state = AgentState::Unknown;
+                let mut best_since: u64 = 0;
+                let mut best_duration: u64 = 0;
+                let mut active_count: usize = 0;
+
+                if let Ok(panes) = std::fs::read_dir(&path) {
+                    for pane_entry in panes.flatten() {
+                        if let Ok(data) = std::fs::read_to_string(pane_entry.path()) {
+                            let parts: Vec<&str> = data.trim().split(' ').collect();
+                            let state = match parts.first().copied() {
+                                Some("active") => AgentState::Active,
+                                Some("idle") => AgentState::Idle,
+                                Some("waiting") => AgentState::Waiting,
+                                _ => continue,
+                            };
+
+                            let ts = parts.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                            let dur = parts.get(2).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+
+                            if matches!(state, AgentState::Active) {
+                                active_count += 1;
                             }
-                        }
-                        if let Some(dur_str) = parts.get(2) {
-                            if let Ok(dur) = dur_str.parse::<u64>() {
-                                if dur > 0 {
-                                    self.ai_last_duration.insert(session.clone(), dur);
-                                }
+
+                            // Priority: Active > Waiting > Idle > Unknown
+                            let dominated = match (&best_state, &state) {
+                                (_, AgentState::Active) => true,
+                                (AgentState::Active, _) => false,
+                                (_, AgentState::Waiting) => true,
+                                (AgentState::Waiting, _) => false,
+                                (_, AgentState::Idle) => true,
+                                _ => false,
+                            };
+                            if dominated {
+                                best_state = state;
+                                best_since = ts;
+                                best_duration = dur;
                             }
                         }
                     }
+                }
+
+                if !matches!(best_state, AgentState::Unknown) {
+                    self.ai_states.insert(session.clone(), best_state);
+                    if best_since > 0 {
+                        self.ai_state_since.insert(session.clone(), best_since);
+                    }
+                    if best_duration > 0 {
+                        self.ai_last_duration.insert(session.clone(), best_duration);
+                    }
+                    if active_count > 0 {
+                        self.ai_pane_count.insert(session, active_count);
+                    } else {
+                        self.ai_pane_count.remove(&session);
+                    }
+                }
+            }
+        }
+    }
+
+    fn load_ai_state_from_file(&mut self, session: &str, path: &std::path::Path) {
+        // Backward compat: old single-file format
+        if let Ok(data) = std::fs::read_to_string(path) {
+            let parts: Vec<&str> = data.trim().split(' ').collect();
+            let state = match parts.first().copied() {
+                Some("active") => AgentState::Active,
+                Some("idle") => AgentState::Idle,
+                Some("waiting") => AgentState::Waiting,
+                _ => return,
+            };
+            self.ai_states.insert(session.to_string(), state);
+            if let Some(ts) = parts.get(1).and_then(|s| s.parse::<u64>().ok()) {
+                self.ai_state_since.insert(session.to_string(), ts);
+            }
+            if let Some(dur) = parts.get(2).and_then(|s| s.parse::<u64>().ok()) {
+                if dur > 0 {
+                    self.ai_last_duration.insert(session.to_string(), dur);
                 }
             }
         }
