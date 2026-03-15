@@ -1,6 +1,6 @@
 # zellij-project-sidebar
 
-A persistent sidebar plugin for [Zellij](https://zellij.dev) that shows your active project sessions at a glance. Switch between projects with a keypress, start new sessions, and see which ones need your attention.
+A persistent sidebar plugin for [Zellij](https://zellij.dev) that shows your active project sessions at a glance. Click or keyboard-navigate to switch between projects, start new sessions, and see real-time AI agent activity across all sessions.
 
 ![screenshot](screenshot.png)
 
@@ -12,14 +12,16 @@ Give this prompt to Claude Code (or your AI coding tool of choice) and it will h
 
 ## Why?
 
-Zellij has great session management, but no ambient awareness. You can't see at a glance which projects are running, which session you're in, or which one has Claude Code waiting for input. This plugin gives you a docked sidebar that stays visible across tabs. Think VS Code's sidebar, but for terminal sessions.
+Zellij has great session management, but no ambient awareness. You can't see at a glance which projects are running, which session you're in, or which one has Claude Code actively working. This plugin gives you a docked sidebar that stays visible across tabs — an agentic AI dashboard for your terminal. Think VS Code's sidebar, but for terminal sessions with real-time AI visibility.
 
 ## Features
 
+- **AI activity at a glance**: see which sessions have Claude Code (or any AI tool) actively working, idle, or needing input — across all sessions, not just the current one
+- **Duration tracking**: shows how long Claude has been working (live timer), and how long the last turn took when idle
 - **Active sessions at a glance**: only shows projects with running or exited sessions, no clutter
 - **Current session highlighted**: green text shows you exactly where you are
 - **Browse mode**: press `/` to search all discovered projects and start new sessions
-- **Attention indicators**: a red diamond appears when a session needs your input (e.g. Claude Code waiting)
+- **Attention indicators**: a magenta `!` appears when a session needs your input
 - **Session lifecycle**: create, switch to, or kill sessions from the sidebar
 - **Auto-discovery**: scans a directory for projects instead of manual configuration
 - **New tab with sidebar**: `Cmd+T` creates tabs that include the sidebar
@@ -116,6 +118,19 @@ plugin location="file:~/.config/zellij/plugins/zellij-project-sidebar.wasm" {
 
 > `Cmd` keys require a terminal that passes them through (e.g. Ghostty with `keybind = cmd+o=unbind`).
 
+## Session status indicators
+
+| Symbol | Colour | Meaning |
+|--------|--------|---------|
+| `▶` | Green | AI agent is actively working |
+| `■` | Cyan | AI agent is idle (done/waiting) |
+| `!` | Magenta | Needs attention |
+| `·` | Orange | Running session, no AI |
+| `·` | Orange | Exited (resurrectable) session |
+| `·` | Cyan | Not started |
+
+The current session's name is highlighted in green. Sessions with AI activity show a detail line with "claude" and duration info (e.g. `claude · 30s` while working, `claude · took 2m` when done).
+
 ## Attention system
 
 The sidebar shows a magenta `!` indicator when a session needs your attention. This is powered by Zellij's pipe messaging:
@@ -134,53 +149,17 @@ Attention is automatically cleared when you switch to a session via the sidebar.
 
 The sidebar shows real-time AI agent activity across all your Zellij sessions. When Claude Code (or any AI tool) is working in a session, you'll see it at a glance without switching sessions.
 
-| Symbol | Colour | Meaning |
-|--------|--------|---------|
-| `▶` | Green | AI agent is actively working |
-| `■` | Cyan | AI agent is idle (done/waiting) |
-| `!` | Magenta | Needs attention |
-| `·` | Orange | No AI activity |
-
-Sessions with AI activity also show "claude" on a detail line beneath the session name.
-
 ### How it works
 
-AI state is shared across all sessions via per-session files in `/tmp/sidebar-ai/`. Each sidebar instance reads these files on a 10-second timer, so cross-session state appears within seconds.
-
-There are two complementary mechanisms:
-1. **Pipe messages** (instant, current session): `zellij pipe --name "sidebar::ai-active::session-name"`
-2. **Shared files** (cross-session, ~10s delay): write `active`/`idle`/`waiting` to `$TMPDIR/zellij-$(id -u)/sidebar-ai/<session-name>`
+AI state is shared across all sessions via per-session files in `$TMPDIR/zellij-$(id -u)/sidebar-ai/`. Each sidebar instance reads these files on a ~10-second timer, so cross-session state appears within seconds. Pipe messages provide instant updates for the current session.
 
 ### Setting up Claude Code hooks
 
-Add the hook script to `~/.claude/hooks/sidebar-status.sh`:
+Copy the hook script from the repo to your Claude hooks directory:
 
 ```bash
-#!/bin/bash
-INPUT=$(cat)
-SESSION="$ZELLIJ_SESSION_NAME"
-[ -z "$SESSION" ] && exit 0
-EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)
-[ -z "$EVENT" ] && exit 0
-
-STATE_DIR="${TMPDIR:-/tmp/}zellij-$(id -u)/sidebar-ai"
-mkdir -p "$STATE_DIR" 2>/dev/null
-
-case "$EVENT" in
-  PostToolUse|SessionStart)
-    echo "active" > "$STATE_DIR/$SESSION"
-    zellij pipe --name "sidebar::ai-active::${SESSION}" 2>/dev/null &
-    ;;
-  Stop)
-    echo "idle" > "$STATE_DIR/$SESSION"
-    zellij pipe --name "sidebar::ai-idle::${SESSION}" 2>/dev/null &
-    ;;
-  Notification)
-    echo "waiting" > "$STATE_DIR/$SESSION"
-    zellij pipe --name "sidebar::ai-waiting::${SESSION}" 2>/dev/null &
-    ;;
-esac
-exit 0
+cp scripts/sidebar-status.sh ~/.claude/hooks/sidebar-status.sh
+chmod +x ~/.claude/hooks/sidebar-status.sh
 ```
 
 Then register it in `~/.claude/settings.json`:
@@ -196,15 +175,19 @@ Then register it in `~/.claude/settings.json`:
 }
 ```
 
+The hook script handles everything: it writes state files for cross-session visibility and sends pipe messages for instant current-session updates. It also tracks turn duration so you can see how long Claude worked.
+
+> **Note:** The hooks fire on tool use events. Plain text responses (no tool calls) and "thinking" time don't trigger hooks, so the sidebar only reflects tool-based activity.
+
 ### Other AI tools
 
 Any tool can integrate — just write to the shared state directory:
 
 ```bash
 # Signal that an AI agent is working in the current session
-echo "active" > "${TMPDIR:-/tmp/}zellij-$(id -u)/sidebar-ai/$ZELLIJ_SESSION_NAME"
+echo "active $(date +%s)" > "${TMPDIR:-/tmp/}zellij-$(id -u)/sidebar-ai/$ZELLIJ_SESSION_NAME"
 
-# Or use pipes for instant updates
+# Or use pipes for instant updates in the current session
 zellij pipe --name "sidebar::ai-active::$ZELLIJ_SESSION_NAME"
 ```
 
@@ -212,10 +195,10 @@ zellij pipe --name "sidebar::ai-active::$ZELLIJ_SESSION_NAME"
 
 | Pipe name | Effect |
 |-----------|--------|
-| `sidebar::ai-active::<session>` | Show AI as working (▶ green) |
-| `sidebar::ai-idle::<session>` | Show AI as idle (■ cyan) |
-| `sidebar::ai-waiting::<session>` | Show AI as waiting (■ cyan) |
-| `sidebar::attention::<session>` | Flag session for attention (! magenta) |
+| `sidebar::ai-active::<session>` | Show AI as working (`▶` green) |
+| `sidebar::ai-idle::<session>` | Show AI as idle (`■` cyan) |
+| `sidebar::ai-waiting::<session>` | Show AI as waiting (`■` cyan) |
+| `sidebar::attention::<session>` | Flag session for attention (`!` magenta) |
 | `sidebar::clear::<session>` | Clear attention flag |
 
 ## Reloading the plugin
