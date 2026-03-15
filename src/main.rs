@@ -867,6 +867,52 @@ layout {
             format!("{}h", secs / 3600)
         }
     }
+
+    /// Save a snapshot of project names+statuses so next load() can render instantly
+    fn save_snapshot(&self) {
+        let mut lines = Vec::new();
+        for p in &self.projects {
+            let status_tag = match &p.status {
+                SessionStatus::Running { is_current, .. } => {
+                    if *is_current { "current" } else { "running" }
+                }
+                SessionStatus::Exited => "exited",
+                SessionStatus::NotStarted => "not_started",
+            };
+            lines.push(format!("{}|{}|{}", p.name, p.path, status_tag));
+        }
+        let _ = std::fs::write("/tmp/sidebar-snapshot", lines.join("\n"));
+    }
+
+    /// Restore snapshot from previous session to avoid blank flash on load
+    fn restore_snapshot(&mut self) {
+        if let Ok(data) = std::fs::read_to_string("/tmp/sidebar-snapshot") {
+            let mut projects = Vec::new();
+            for line in data.lines() {
+                let parts: Vec<&str> = line.splitn(3, '|').collect();
+                if parts.len() < 3 { continue; }
+                let status = match parts[2] {
+                    "current" | "running" => SessionStatus::Running {
+                        is_current: false, // will be corrected by next SessionUpdate
+                        tab_count: 1,
+                        active_command: None,
+                    },
+                    "exited" => SessionStatus::Exited,
+                    _ => SessionStatus::NotStarted,
+                };
+                projects.push(Project {
+                    name: parts[0].to_string(),
+                    path: parts[1].to_string(),
+                    status,
+                    metadata: ProjectMetadata::default(),
+                });
+            }
+            if !projects.is_empty() {
+                self.projects = projects;
+                self.initial_load_complete = true; // render immediately, no blank frame
+            }
+        }
+    }
 }
 
 // --- Plugin Lifecycle ---
@@ -951,7 +997,8 @@ impl ZellijPlugin for State {
         // Ensure pane is focusable so user can accept the permissions dialog
         set_selectable(true);
 
-        // Restore persisted AI state so cross-session dots are visible immediately
+        // Restore previous state instantly to avoid blank flash on load
+        self.restore_snapshot();
         self.load_ai_states();
 
         eprintln!("Plugin loaded, requesting permissions");
@@ -1085,6 +1132,8 @@ impl ZellijPlugin for State {
                         self.selected_index = fi;
                     }
                 }
+                // Cache project list so next load() can render instantly
+                self.save_snapshot();
                 true
             }
             Event::Mouse(mouse) => {
