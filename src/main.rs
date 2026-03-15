@@ -872,12 +872,13 @@ layout {
     fn save_snapshot(&self) {
         let mut lines = Vec::new();
         for p in &self.projects {
+            // Only snapshot running/exited — NotStarted are filtered out in default view
             let status_tag = match &p.status {
                 SessionStatus::Running { is_current, .. } => {
                     if *is_current { "current" } else { "running" }
                 }
                 SessionStatus::Exited => "exited",
-                SessionStatus::NotStarted => "not_started",
+                SessionStatus::NotStarted => continue,
             };
             lines.push(format!("{}|{}|{}", p.name, p.path, status_tag));
         }
@@ -1285,12 +1286,7 @@ impl ZellijPlugin for State {
         }
 
         if self.projects.is_empty() {
-            if self.use_discovery {
-                println!("No projects found.");
-            } else {
-                println!("No projects configured.");
-            }
-            return;
+            return; // Render nothing — SessionUpdate will populate shortly
         }
 
         let mut y_offset: usize = 0;
