@@ -790,18 +790,9 @@ layout {
     }
 
     fn save_ai_states(&self) {
-        // Write per-session files for cross-session visibility
-        let _ = std::fs::create_dir_all("/tmp/sidebar-ai");
-        for (session, state) in &self.ai_states {
-            let state_str = match state {
-                AgentState::Active => "active",
-                AgentState::Idle => "idle",
-                AgentState::Waiting => "waiting",
-                AgentState::Unknown => "unknown",
-            };
-            let ts = self.ai_state_since.get(session).copied().unwrap_or(0);
-            let _ = std::fs::write(format!("/tmp/sidebar-ai/{}", session), format!("{} {}", state_str, ts));
-        }
+        // No-op: hook script writes the shared files directly.
+        // Plugin only reads them via load_ai_states().
+        // Pipe messages handle instant in-memory updates for the current session.
     }
 
     fn load_ai_states(&mut self) {
