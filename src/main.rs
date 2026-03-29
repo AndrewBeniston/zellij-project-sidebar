@@ -19,6 +19,7 @@ const COLOR_MAGENTA: usize = 3;
 
 const CMD_KEY: &str = "cmd";
 const CMD_SCAN_DIR: &str = "scan_dir";
+const CMD_SCAN_DIR_LABEL: &str = "scan_dir_label";
 const CMD_GIT_BRANCH: &str = "git_branch";
 const PROJECT_KEY: &str = "project";
 
@@ -83,6 +84,7 @@ struct ProjectMetadata {
 struct Project {
     name: String,
     path: String,
+    scan_dir_label: String,
     status: SessionStatus,
     metadata: ProjectMetadata,
 }
@@ -120,9 +122,10 @@ struct State {
     browse_mode: bool, // true = browsing all projects to find/start one
 
     // Discovery mode
-    scan_dir: Option<String>,
+    scan_dirs: Vec<String>,
+    pending_scans: usize,
     use_discovery: bool,
-    discovered_dirs: Vec<(String, String)>,
+    discovered_dirs: Vec<(String, String, String)>,  // (name, path, scan_dir_label)
     scan_complete: bool,
     has_session_data: bool,
 
@@ -163,7 +166,8 @@ impl Default for State {
             verbosity: Verbosity::default(),
             search_query: String::new(),
             browse_mode: false,
-            scan_dir: None,
+            scan_dirs: Vec::new(),
+            pending_scans: 0,
             use_discovery: false,
             discovered_dirs: Vec::new(),
             scan_complete: false,
@@ -186,6 +190,26 @@ impl Default for State {
 register_plugin!(State);
 
 // --- Helpers ---
+
+fn path_to_label(path: &str) -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        if path.starts_with(&home) {
+            return format!("~{}", &path[home.len()..]);
+        }
+    }
+    path.to_string()
+}
+
+fn expand_tilde(path: &str) -> String {
+    if path == "~" {
+        std::env::var("HOME").unwrap_or_else(|_| path.to_string())
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+        format!("{}/{}", home, rest)
+    } else {
+        path.to_string()
+    }
+}
 
 fn extract_active_command(session: &SessionInfo) -> Option<String> {
     session.tabs.iter()
@@ -241,17 +265,31 @@ impl State {
     fn filtered_indices(&self) -> Vec<usize> {
         if self.use_discovery {
             if self.browse_mode {
-                // Browse mode: all projects, filtered by search
-                self.projects.iter().enumerate()
+                // Browse mode: all projects filtered by search, sorted by (scan_dir_label, name)
+                let mut indices: Vec<usize> = self.projects.iter().enumerate()
                     .filter(|(_, p)| fuzzy_matches(&p.name, &self.search_query))
                     .map(|(i, _)| i)
-                    .collect()
+                    .collect();
+                indices.sort_by(|&a, &b| {
+                    let pa = &self.projects[a];
+                    let pb = &self.projects[b];
+                    pa.scan_dir_label.cmp(&pb.scan_dir_label)
+                        .then(pa.name.to_lowercase().cmp(&pb.name.to_lowercase()))
+                });
+                indices
             } else {
-                // Normal mode: only projects with active sessions (Running or Exited)
-                self.projects.iter().enumerate()
+                // Normal mode: only projects with active sessions, sorted by (scan_dir_label, name)
+                let mut indices: Vec<usize> = self.projects.iter().enumerate()
                     .filter(|(_, p)| !matches!(p.status, SessionStatus::NotStarted))
                     .map(|(i, _)| i)
-                    .collect()
+                    .collect();
+                indices.sort_by(|&a, &b| {
+                    let pa = &self.projects[a];
+                    let pb = &self.projects[b];
+                    pa.scan_dir_label.cmp(&pb.scan_dir_label)
+                        .then(pa.name.to_lowercase().cmp(&pb.name.to_lowercase()))
+                });
+                indices
             }
         } else {
             // Legacy mode: show all
@@ -366,10 +404,18 @@ keybinds {{
 
     // --- Discovery ---
 
-    fn trigger_scan(&self) {
-        if let Some(ref dir) = self.scan_dir {
+    fn trigger_scan(&mut self) {
+        self.discovered_dirs.clear();
+        self.scan_complete = false;
+        self.pending_scans = self.scan_dirs.len();
+        if self.pending_scans == 0 {
+            self.scan_complete = true;
+            return;
+        }
+        for dir in &self.scan_dirs {
             let mut ctx = BTreeMap::new();
             ctx.insert(CMD_KEY.to_string(), CMD_SCAN_DIR.to_string());
+            ctx.insert(CMD_SCAN_DIR_LABEL.to_string(), path_to_label(dir));
             run_command(
                 &["find", dir, "-maxdepth", "1", "-mindepth", "1", "-type", "d", "-not", "-name", ".*"],
                 ctx,
@@ -387,7 +433,7 @@ keybinds {{
             .map(|idx| self.projects[idx].name.clone());
 
         self.projects = self.discovered_dirs.iter()
-            .map(|(name, path)| {
+            .map(|(name, path, label)| {
                 let status = self.cached_statuses
                     .get(name)
                     .cloned()
@@ -397,6 +443,7 @@ keybinds {{
                 Project {
                     name: name.clone(),
                     path: path.clone(),
+                    scan_dir_label: label.clone(),
                     status,
                     metadata,
                 }
@@ -539,35 +586,66 @@ keybinds {{
         let mut lines = Vec::new();
         let filtered = self.filtered_indices();
 
-        if self.browse_mode && !filtered.is_empty() {
-            lines.push(RenderLine::Header("All projects".to_string()));
-        }
+        // Render cards grouped by scan_dir_label (works for both browse and normal mode)
+        // filtered is already sorted by (scan_dir_label, name) from filtered_indices()
+        if !filtered.is_empty() {
+            let has_multiple_groups = {
+                let mut labels: Vec<&str> = filtered.iter()
+                    .map(|&i| self.projects[i].scan_dir_label.as_str())
+                    .collect();
+                labels.dedup();
+                labels.len() > 1
+            };
 
-        let total = filtered.len();
-        for (fi, &i) in filtered.iter().enumerate() {
-            let project = &self.projects[i];
-
-            if fi == 0 {
-                lines.push(RenderLine::CardTop);
-            } else {
-                lines.push(RenderLine::CardDivider);
+            if self.browse_mode && !has_multiple_groups {
+                lines.push(RenderLine::Header("All projects".to_string()));
             }
 
-            lines.push(RenderLine::ProjectRow(i));
+            let total = filtered.len();
+            let mut current_label: Option<&str> = None;
+            let mut group_open = false;
 
-            // Detail line when there's meaningful content
-            let multi_tab = matches!(project.status, SessionStatus::Running { tab_count, .. } if tab_count > 1);
-            let has_command = matches!(project.status, SessionStatus::Running { active_command: Some(_), .. });
-            let ai_state = self.ai_states.get(&project.name);
-            let has_claude = ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown));
-            let has_pills = !project.metadata.pills.is_empty();
-            let has_progress = project.metadata.progress_pct.is_some();
-            if multi_tab || has_command || has_claude || has_pills || has_progress {
-                lines.push(RenderLine::ProjectDetail(i));
-            }
+            for (fi, &i) in filtered.iter().enumerate() {
+                let project = &self.projects[i];
+                let label = project.scan_dir_label.as_str();
 
-            if fi == total - 1 {
-                lines.push(RenderLine::CardBottom);
+                let group_changed = has_multiple_groups && current_label != Some(label);
+
+                if group_changed {
+                    if group_open {
+                        lines.push(RenderLine::CardBottom);
+                    }
+                    lines.push(RenderLine::Header(label.to_string()));
+                    lines.push(RenderLine::CardTop);
+                    current_label = Some(label);
+                    group_open = true;
+                } else if fi == 0 {
+                    lines.push(RenderLine::CardTop);
+                    group_open = true;
+                } else {
+                    lines.push(RenderLine::CardDivider);
+                }
+
+                lines.push(RenderLine::ProjectRow(i));
+
+                let multi_tab = matches!(project.status, SessionStatus::Running { tab_count, .. } if tab_count > 1);
+                let has_command = matches!(project.status, SessionStatus::Running { active_command: Some(_), .. });
+                let ai_state = self.ai_states.get(&project.name);
+                let has_claude = ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown));
+                let has_pills = !project.metadata.pills.is_empty();
+                let has_progress = project.metadata.progress_pct.is_some();
+                if multi_tab || has_command || has_claude || has_pills || has_progress {
+                    lines.push(RenderLine::ProjectDetail(i));
+                }
+
+                let is_last = fi == total - 1;
+                let next_is_new_group = has_multiple_groups && filtered.get(fi + 1)
+                    .map(|&next_i| self.projects[next_i].scan_dir_label.as_str() != label)
+                    .unwrap_or(false);
+                if is_last || next_is_new_group {
+                    lines.push(RenderLine::CardBottom);
+                    group_open = false;
+                }
             }
         }
 
@@ -938,6 +1016,7 @@ keybinds {{
                 projects.push(Project {
                     name: parts[0].to_string(),
                     path: parts[1].to_string(),
+                    scan_dir_label: String::new(),
                     status,
                     metadata: ProjectMetadata::default(),
                 });
@@ -965,13 +1044,20 @@ impl ZellijPlugin for State {
             };
         }
 
-        self.scan_dir = configuration.get("scan_dir").cloned();
-        self.session_layout = configuration.get("session_layout").cloned();
+        if let Some(dir) = configuration.get("scan_dir") {
+            self.scan_dirs.push(expand_tilde(dir));
+        }
+        let mut scan_idx = 1usize;
+        while let Some(dir) = configuration.get(&format!("scan_dir_{}", scan_idx)) {
+            self.scan_dirs.push(expand_tilde(dir));
+            scan_idx += 1;
+        }
+        self.session_layout = configuration.get("session_layout").map(|p| expand_tilde(p));
         self.is_primary = configuration.get("is_primary").map(|v| v != "false").unwrap_or(true);
-        self.use_discovery = self.scan_dir.is_some();
+        self.use_discovery = !self.scan_dirs.is_empty();
 
         if self.use_discovery {
-            eprintln!("Discovery mode: scan_dir={:?}", self.scan_dir);
+            eprintln!("Discovery mode: scan_dirs={:?}", self.scan_dirs);
         } else {
             let mut i = 0;
             while let Some(path_str) = configuration.get(&format!("project_{}", i)) {
@@ -992,6 +1078,7 @@ impl ZellijPlugin for State {
                 self.projects.push(Project {
                     name,
                     path: path_str.clone(),
+                    scan_dir_label: String::new(),
                     status: SessionStatus::NotStarted,
                     metadata: ProjectMetadata::default(),
                 });
@@ -1064,19 +1151,21 @@ impl ZellijPlugin for State {
                     Some(CMD_SCAN_DIR) => {
                         if exit_code == Some(0) {
                             let output = String::from_utf8_lossy(&stdout);
-                            self.discovered_dirs = output
-                                .lines()
-                                .filter(|line| !line.is_empty())
-                                .map(|full_path| {
-                                    let name = PathBuf::from(full_path)
-                                        .file_name()
-                                        .and_then(|n| n.to_str())
-                                        .unwrap_or("unknown")
-                                        .to_string();
-                                    (name, full_path.to_string())
-                                })
-                                .collect();
-                            eprintln!("Discovered {} directories", self.discovered_dirs.len());
+                            let label = context.get(CMD_SCAN_DIR_LABEL).cloned().unwrap_or_default();
+                            self.discovered_dirs.extend(
+                                output
+                                    .lines()
+                                    .filter(|line| !line.is_empty())
+                                    .map(|full_path| {
+                                        let name = PathBuf::from(full_path)
+                                            .file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or("unknown")
+                                            .to_string();
+                                        (name, full_path.to_string(), label.clone())
+                                    })
+                            );
+                            eprintln!("Discovered {} directories so far", self.discovered_dirs.len());
                         } else {
                             eprintln!(
                                 "scan_dir failed (exit {:?}): {}",
@@ -1084,8 +1173,13 @@ impl ZellijPlugin for State {
                                 String::from_utf8_lossy(&stderr)
                             );
                         }
-                        self.scan_complete = true;
-                        self.rebuild_projects();
+                        if self.pending_scans > 0 {
+                            self.pending_scans -= 1;
+                        }
+                        if self.pending_scans == 0 {
+                            self.scan_complete = true;
+                            self.rebuild_projects();
+                        }
                         true
                     }
                     Some(CMD_GIT_BRANCH) => {
@@ -1127,6 +1221,7 @@ impl ZellijPlugin for State {
                             .map(|(name, status)| Project {
                                 name: name.clone(),
                                 path: String::new(),
+                                scan_dir_label: String::new(),
                                 status: status.clone(),
                                 metadata: ProjectMetadata::default(),
                             })
@@ -1263,7 +1358,6 @@ impl ZellijPlugin for State {
                 }
                 BareKey::Char('r') if key.has_modifiers(&[KeyModifier::Alt]) => {
                     if self.use_discovery {
-                        self.scan_complete = false;
                         self.trigger_scan();
                     }
                     true
