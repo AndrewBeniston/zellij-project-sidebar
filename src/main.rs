@@ -338,49 +338,15 @@ keybinds {{
     }
 
     fn create_tab_with_sidebar(&self) {
-        let scan_dir = self.scan_dir.as_deref().unwrap_or("");
-        let session_layout = self.session_layout.as_deref().unwrap_or("");
-
-        let layout = if self.use_discovery {
-            format!(
-                r#"
-layout {{
-    pane size=1 borderless=true {{
-        plugin location="zellij:tab-bar"
-    }}
-    pane split_direction="vertical" {{
-        pane size="15%" name="Projects" {{
-            plugin location="file:~/.config/zellij/plugins/zellij-project-sidebar.wasm" {{
-                scan_dir "{scan_dir}"
-                session_layout "{session_layout}"
-                is_primary "false"
-            }}
-        }}
-        pane
-    }}
-    pane size=1 borderless=true {{
-        plugin location="file:~/.config/zellij/plugins/zellij-attention.wasm" {{
-            enabled "true"
-            waiting_icon "⏳"
-            completed_icon "✅"
-        }}
-    }}
-}}
-"#
-            )
+        // Use the session_layout file so new tabs match the user's default_tab_template.
+        // Hardcoding a layout string here forces specific plugin paths and is fragile;
+        // the layout file already describes the correct tab structure.
+        if let Some(ref layout_path) = self.session_layout {
+            new_tabs_with_layout_info(LayoutInfo::File(layout_path.clone(), Default::default()));
         } else {
-            // Legacy mode — plain tab
-            String::from(
-                r#"
-layout {
-    pane
-}
-"#
-            )
-        };
-
-        new_tabs_with_layout(&layout);
-        eprintln!("Created new tab with sidebar layout");
+            // Fallback: plain tab when no session_layout is configured
+            new_tabs_with_layout("layout { pane }");
+        }
     }
 
     fn toggle_visibility(&mut self) {
