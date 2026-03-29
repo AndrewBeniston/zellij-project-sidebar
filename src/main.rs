@@ -278,7 +278,7 @@ impl State {
                     if let Some(ref layout_path) = self.session_layout {
                         switch_session_with_layout(
                             Some(&project.name),
-                            LayoutInfo::File(layout_path.clone()),
+                            LayoutInfo::File(layout_path.clone(), Default::default()),
                             Some(PathBuf::from(&project.path)),
                         );
                     } else {
@@ -392,7 +392,7 @@ layout {
             eprintln!("Sidebar deactivated");
         } else {
             set_selectable(true);
-            focus_plugin_pane(get_plugin_ids().plugin_id, false);
+            focus_plugin_pane(get_plugin_ids().plugin_id, false, false);
             self.is_focused = true;
             eprintln!("Sidebar activated");
         }
