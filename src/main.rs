@@ -21,6 +21,7 @@ const CMD_KEY: &str = "cmd";
 const CMD_SCAN_DIR: &str = "scan_dir";
 const CMD_SCAN_DIR_LABEL: &str = "scan_dir_label";
 const CMD_GIT_BRANCH: &str = "git_branch";
+const CMD_LOAD_AI: &str = "load_ai";
 const PROJECT_KEY: &str = "project";
 
 // --- Verbosity ---
@@ -151,6 +152,7 @@ struct State {
     ai_state_since: BTreeMap<String, u64>, // unix timestamp when state started
     ai_last_duration: BTreeMap<String, u64>, // seconds the last active turn lasted
     ai_pane_count: BTreeMap<String, usize>,  // number of active AI panes per session
+    ai_agent_name: BTreeMap<String, String>, // agent name per session (e.g. "claude", "opencode")
 }
 
 impl Default for State {
@@ -183,6 +185,7 @@ impl Default for State {
             ai_state_since: BTreeMap::new(),
             ai_last_duration: BTreeMap::new(),
             ai_pane_count: BTreeMap::new(),
+            ai_agent_name: BTreeMap::new(),
         }
     }
 }
@@ -190,6 +193,16 @@ impl Default for State {
 register_plugin!(State);
 
 // --- Helpers ---
+
+/// Parse "SESSION::AGENT" from pipe name suffix. Agent is optional (backward compat).
+fn parse_session_agent(rest: &str) -> (&str, Option<&str>) {
+    if let Some(idx) = rest.find("::") {
+        let agent = &rest[idx + 2..];
+        (&rest[..idx], if agent.is_empty() { None } else { Some(agent) })
+    } else {
+        (rest, None)
+    }
+}
 
 fn path_to_label(path: &str) -> String {
     if let Ok(home) = std::env::var("HOME") {
@@ -683,18 +696,19 @@ keybinds {{
     }
 
     fn render_project_name_line(&self, project: &Project, is_selected: bool, cols: usize) -> Text {
-        let needs_attention = self.attention_sessions.contains(&project.name);
         let is_current_session = matches!(&project.status, SessionStatus::Running { is_current: true, .. });
 
         // Determine icon + color based on state priority
+        // needs_attention: pipe-based (same session) OR state-file-based "waiting" (cross-session)
         let ai_state = self.ai_states.get(&project.name);
+        let needs_attention = self.attention_sessions.contains(&project.name)
+            || matches!(ai_state, Some(AgentState::Waiting));
         let (status_icon, dot_color) = if needs_attention {
             ("!", COLOR_MAGENTA)      // ! = needs attention (magenta)
         } else {
             match ai_state {
                 Some(AgentState::Active) => ("▶", COLOR_GREEN),    // ▶ = Claude working (green)
-                Some(AgentState::Waiting) | Some(AgentState::Idle) =>
-                    ("■", COLOR_CYAN),                             // ■ = Claude stopped (cyan)
+                Some(AgentState::Idle) => ("■", COLOR_CYAN),       // ■ = Claude stopped (cyan)
                 _ => ("·", COLOR_ORANGE),                          // · = no AI state
             }
         };
@@ -748,7 +762,9 @@ keybinds {{
         let ai_state = self.ai_states.get(&project.name);
         if ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown)) {
             let count = self.ai_pane_count.get(&project.name).copied().unwrap_or(0);
-            let prefix = if count > 1 { format!("claude x{}", count) } else { "claude".to_string() };
+            let agent_name = self.ai_agent_name.get(&project.name).map(|s| s.as_str()).unwrap_or("agent");
+            eprintln!("render_detail[{}]: ai_state={:?} agent_name={:?} ai_agent_name_map_size={}", &project.name, ai_state, agent_name, self.ai_agent_name.len());
+            let prefix = if count > 1 { format!("{} x{}", agent_name, count) } else { agent_name.to_string() };
             let label = if matches!(ai_state, Some(AgentState::Active)) {
                 let elapsed = self.format_elapsed(&project.name);
                 if elapsed.is_empty() { prefix } else { format!("{} · {}", prefix, elapsed) }
@@ -847,102 +863,75 @@ keybinds {{
     }
 
     fn load_ai_states(&mut self) {
-        // Read per-pane files: /tmp/sidebar-ai/<session>/<pane_id>
-        // Each file: "state timestamp [duration]"
-        // Aggregate per session: hottest state wins, count active panes
-        if let Ok(sessions) = std::fs::read_dir("/tmp/sidebar-ai") {
-            for session_entry in sessions.flatten() {
-                let session = match session_entry.file_name().to_str().map(|s| s.to_string()) {
-                    Some(s) => s,
-                    None => continue,
-                };
-                let path = session_entry.path();
-
-                // Handle both old format (session is a file) and new format (session is a dir)
-                if path.is_file() {
-                    self.load_ai_state_from_file(&session, &path);
-                    continue;
-                }
-                if !path.is_dir() { continue; }
-
-                let mut best_state = AgentState::Unknown;
-                let mut best_since: u64 = 0;
-                let mut best_duration: u64 = 0;
-                let mut active_count: usize = 0;
-
-                if let Ok(panes) = std::fs::read_dir(&path) {
-                    for pane_entry in panes.flatten() {
-                        if let Ok(data) = std::fs::read_to_string(pane_entry.path()) {
-                            let parts: Vec<&str> = data.trim().split(' ').collect();
-                            let state = match parts.first().copied() {
-                                Some("active") => AgentState::Active,
-                                Some("idle") => AgentState::Idle,
-                                Some("waiting") => AgentState::Waiting,
-                                _ => continue,
-                            };
-
-                            let ts = parts.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-                            let dur = parts.get(2).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-
-                            if matches!(state, AgentState::Active) {
-                                active_count += 1;
-                            }
-
-                            // Priority: Active > Waiting > Idle > Unknown
-                            let dominated = match (&best_state, &state) {
-                                (_, AgentState::Active) => true,
-                                (AgentState::Active, _) => false,
-                                (_, AgentState::Waiting) => true,
-                                (AgentState::Waiting, _) => false,
-                                (_, AgentState::Idle) => true,
-                                _ => false,
-                            };
-                            if dominated {
-                                best_state = state;
-                                best_since = ts;
-                                best_duration = dur;
-                            }
-                        }
-                    }
-                }
-
-                if !matches!(best_state, AgentState::Unknown) {
-                    self.ai_states.insert(session.clone(), best_state);
-                    if best_since > 0 {
-                        self.ai_state_since.insert(session.clone(), best_since);
-                    }
-                    if best_duration > 0 {
-                        self.ai_last_duration.insert(session.clone(), best_duration);
-                    }
-                    if active_count > 0 {
-                        self.ai_pane_count.insert(session, active_count);
-                    } else {
-                        self.ai_pane_count.remove(&session);
-                    }
-                }
-            }
-        }
+        // WASM filesystem access is sandboxed — use run_command to read state files on the host.
+        // Output format per line: "SESSION STATE TIMESTAMP DURATION [AGENT]"
+        // The shell aggregates per-session: hottest pane state wins.
+        let script = r#"
+dir=/tmp/sidebar-ai
+[ -d "$dir" ] || exit 0
+now=$(date +%s)
+stale=300
+for session_dir in "$dir"/*/; do
+  [ -d "$session_dir" ] || continue
+  session=$(basename "$session_dir")
+  best_rank=0; best_state=""; best_ts=0; best_dur=0; best_agent=""
+  for f in "$session_dir"*; do
+    [ -f "$f" ] || continue
+    read -r line < "$f" 2>/dev/null || continue
+    state=$(echo "$line" | awk '{print $1}')
+    ts=$(echo "$line" | awk '{print $2}')
+    dur=$(echo "$line" | awk '{print $3}')
+    agent=$(echo "$line" | awk '{print $4}')
+    # Skip non-idle states whose file hasn't been touched in >5 min (killed agent)
+    if [ "$state" != "idle" ]; then
+      mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+      age=$((now - mtime))
+      [ "$age" -gt "$stale" ] && continue
+    fi
+    case "$state" in
+      active) rank=3 ;;
+      waiting) rank=2 ;;
+      idle) rank=1 ;;
+      *) rank=0 ;;
+    esac
+    if [ "$rank" -gt "$best_rank" ]; then
+      best_rank=$rank; best_state=$state; best_ts=$ts; best_dur=$dur; best_agent=$agent
+    fi
+  done
+  [ -n "$best_state" ] && echo "$session $best_state $best_ts $best_dur $best_agent"
+done
+"#;
+        let mut ctx = BTreeMap::new();
+        ctx.insert(CMD_KEY.to_string(), CMD_LOAD_AI.to_string());
+        run_command_with_env_variables_and_cwd(
+            &["sh", "-c", script],
+            BTreeMap::new(),
+            PathBuf::from("/"),
+            ctx,
+        );
     }
 
-    fn load_ai_state_from_file(&mut self, session: &str, path: &std::path::Path) {
-        // Backward compat: old single-file format
-        if let Ok(data) = std::fs::read_to_string(path) {
-            let parts: Vec<&str> = data.trim().split(' ').collect();
-            let state = match parts.first().copied() {
+    fn apply_ai_states_from_output(&mut self, stdout: &[u8]) {
+        // Parse "SESSION STATE TIMESTAMP DURATION [AGENT]" lines from load_ai shell command
+        let output = String::from_utf8_lossy(stdout);
+        for line in output.lines() {
+            let parts: Vec<&str> = line.trim().split(' ').collect();
+            if parts.len() < 2 { continue; }
+            let session = parts[0];
+            let state = match parts.get(1).copied() {
                 Some("active") => AgentState::Active,
                 Some("idle") => AgentState::Idle,
                 Some("waiting") => AgentState::Waiting,
-                _ => return,
+                _ => continue,
             };
+            let ts = parts.get(2).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            let dur = parts.get(3).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            let agent = parts.get(4).copied().unwrap_or("").trim();
+
             self.ai_states.insert(session.to_string(), state);
-            if let Some(ts) = parts.get(1).and_then(|s| s.parse::<u64>().ok()) {
-                self.ai_state_since.insert(session.to_string(), ts);
-            }
-            if let Some(dur) = parts.get(2).and_then(|s| s.parse::<u64>().ok()) {
-                if dur > 0 {
-                    self.ai_last_duration.insert(session.to_string(), dur);
-                }
-            }
+            if ts > 0 { self.ai_state_since.insert(session.to_string(), ts); }
+            if dur > 0 { self.ai_last_duration.insert(session.to_string(), dur); }
+            if !agent.is_empty() { self.ai_agent_name.insert(session.to_string(), agent.to_string()); }
         }
     }
 
@@ -1194,6 +1183,10 @@ impl ZellijPlugin for State {
                         }
                         changed
                     }
+                    Some(CMD_LOAD_AI) => {
+                        self.apply_ai_states_from_output(&stdout);
+                        true
+                    }
                     _ => false,
                 }
             }
@@ -1206,8 +1199,11 @@ impl ZellijPlugin for State {
                     // AI state from pipe messages must survive SessionUpdate cycles
                     let known_names: BTreeSet<String> = self.cached_statuses.keys().cloned().collect();
                     self.cached_metadata.retain(|name, _| known_names.contains(name));
-                    // Prune stale AI states for sessions that no longer exist
-                    self.ai_states.retain(|name, _| known_names.contains(name));
+                    // Do NOT retain ai_states/ai_agent_name here — SessionUpdate fires on every
+                    // session switch and can wipe pipe-delivered state before it re-arrives.
+                    // Stale entries for truly deleted sessions are harmless (they won't be in
+                    // discovered_dirs and won't render).
+                    self.load_ai_states();
 
                     if self.scan_complete {
                         self.apply_cached_statuses();
@@ -1567,33 +1563,38 @@ impl ZellijPlugin for State {
                 eprintln!("Sidebar activated via pipe (legacy focus_sidebar)");
                 true
             }
-            // sidebar::ai-active::{session} / sidebar::ai-idle::{session} / sidebar::ai-waiting::{session}
+            // sidebar::ai-active::{session}::{agent} (agent optional for backward compat)
             name if name.starts_with("sidebar::ai-active::") => {
-                let session = name.strip_prefix("sidebar::ai-active::").unwrap_or("").to_string();
+                let rest = name.strip_prefix("sidebar::ai-active::").unwrap_or("");
+                let (session, agent) = parse_session_agent(rest);
                 if !session.is_empty() {
-                    // Only reset timestamp if transitioning TO active
-                    if !matches!(self.ai_states.get(&session), Some(AgentState::Active)) {
-                        self.ai_state_since.insert(session.clone(), self.now_secs());
+                    if !matches!(self.ai_states.get(session), Some(AgentState::Active)) {
+                        self.ai_state_since.insert(session.to_string(), self.now_secs());
                     }
-                    self.ai_states.insert(session, AgentState::Active);
+                    self.ai_states.insert(session.to_string(), AgentState::Active);
+                    if let Some(a) = agent { self.ai_agent_name.insert(session.to_string(), a.to_string()); }
                     self.save_ai_states();
                 }
                 true
             }
             name if name.starts_with("sidebar::ai-idle::") => {
-                let session = name.strip_prefix("sidebar::ai-idle::").unwrap_or("").to_string();
+                let rest = name.strip_prefix("sidebar::ai-idle::").unwrap_or("");
+                let (session, agent) = parse_session_agent(rest);
                 if !session.is_empty() {
-                    self.ai_state_since.insert(session.clone(), self.now_secs());
-                    self.ai_states.insert(session, AgentState::Idle);
+                    self.ai_state_since.insert(session.to_string(), self.now_secs());
+                    self.ai_states.insert(session.to_string(), AgentState::Idle);
+                    if let Some(a) = agent { self.ai_agent_name.insert(session.to_string(), a.to_string()); }
                     self.save_ai_states();
                 }
                 true
             }
             name if name.starts_with("sidebar::ai-waiting::") => {
-                let session = name.strip_prefix("sidebar::ai-waiting::").unwrap_or("").to_string();
+                let rest = name.strip_prefix("sidebar::ai-waiting::").unwrap_or("");
+                let (session, agent) = parse_session_agent(rest);
                 if !session.is_empty() {
-                    self.ai_state_since.insert(session.clone(), self.now_secs());
-                    self.ai_states.insert(session, AgentState::Waiting);
+                    self.ai_state_since.insert(session.to_string(), self.now_secs());
+                    self.ai_states.insert(session.to_string(), AgentState::Waiting);
+                    if let Some(a) = agent { self.ai_agent_name.insert(session.to_string(), a.to_string()); }
                     self.save_ai_states();
                 }
                 true
