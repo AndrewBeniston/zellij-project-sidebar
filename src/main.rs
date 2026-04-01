@@ -19,7 +19,9 @@ const COLOR_MAGENTA: usize = 3;
 
 const CMD_KEY: &str = "cmd";
 const CMD_SCAN_DIR: &str = "scan_dir";
+const CMD_SCAN_DIR_LABEL: &str = "scan_dir_label";
 const CMD_GIT_BRANCH: &str = "git_branch";
+const CMD_LOAD_AI: &str = "load_ai";
 const PROJECT_KEY: &str = "project";
 
 // --- Verbosity ---
@@ -83,6 +85,7 @@ struct ProjectMetadata {
 struct Project {
     name: String,
     path: String,
+    scan_dir_label: String,
     status: SessionStatus,
     metadata: ProjectMetadata,
 }
@@ -120,9 +123,10 @@ struct State {
     browse_mode: bool, // true = browsing all projects to find/start one
 
     // Discovery mode
-    scan_dir: Option<String>,
+    scan_dirs: Vec<String>,
+    pending_scans: usize,
     use_discovery: bool,
-    discovered_dirs: Vec<(String, String)>,
+    discovered_dirs: Vec<(String, String, String)>,  // (name, path, scan_dir_label)
     scan_complete: bool,
     has_session_data: bool,
 
@@ -148,6 +152,7 @@ struct State {
     ai_state_since: BTreeMap<String, u64>, // unix timestamp when state started
     ai_last_duration: BTreeMap<String, u64>, // seconds the last active turn lasted
     ai_pane_count: BTreeMap<String, usize>,  // number of active AI panes per session
+    ai_agent_name: BTreeMap<String, String>, // agent name per session (e.g. "claude", "opencode")
 }
 
 impl Default for State {
@@ -163,7 +168,8 @@ impl Default for State {
             verbosity: Verbosity::default(),
             search_query: String::new(),
             browse_mode: false,
-            scan_dir: None,
+            scan_dirs: Vec::new(),
+            pending_scans: 0,
             use_discovery: false,
             discovered_dirs: Vec::new(),
             scan_complete: false,
@@ -179,6 +185,7 @@ impl Default for State {
             ai_state_since: BTreeMap::new(),
             ai_last_duration: BTreeMap::new(),
             ai_pane_count: BTreeMap::new(),
+            ai_agent_name: BTreeMap::new(),
         }
     }
 }
@@ -186,6 +193,36 @@ impl Default for State {
 register_plugin!(State);
 
 // --- Helpers ---
+
+/// Parse "SESSION::AGENT" from pipe name suffix. Agent is optional (backward compat).
+fn parse_session_agent(rest: &str) -> (&str, Option<&str>) {
+    if let Some(idx) = rest.find("::") {
+        let agent = &rest[idx + 2..];
+        (&rest[..idx], if agent.is_empty() { None } else { Some(agent) })
+    } else {
+        (rest, None)
+    }
+}
+
+fn path_to_label(path: &str) -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        if path.starts_with(&home) {
+            return format!("~{}", &path[home.len()..]);
+        }
+    }
+    path.to_string()
+}
+
+fn expand_tilde(path: &str) -> String {
+    if path == "~" {
+        std::env::var("HOME").unwrap_or_else(|_| path.to_string())
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+        format!("{}/{}", home, rest)
+    } else {
+        path.to_string()
+    }
+}
 
 fn extract_active_command(session: &SessionInfo) -> Option<String> {
     session.tabs.iter()
@@ -241,17 +278,31 @@ impl State {
     fn filtered_indices(&self) -> Vec<usize> {
         if self.use_discovery {
             if self.browse_mode {
-                // Browse mode: all projects, filtered by search
-                self.projects.iter().enumerate()
+                // Browse mode: all projects filtered by search, sorted by (scan_dir_label, name)
+                let mut indices: Vec<usize> = self.projects.iter().enumerate()
                     .filter(|(_, p)| fuzzy_matches(&p.name, &self.search_query))
                     .map(|(i, _)| i)
-                    .collect()
+                    .collect();
+                indices.sort_by(|&a, &b| {
+                    let pa = &self.projects[a];
+                    let pb = &self.projects[b];
+                    pa.scan_dir_label.cmp(&pb.scan_dir_label)
+                        .then(pa.name.to_lowercase().cmp(&pb.name.to_lowercase()))
+                });
+                indices
             } else {
-                // Normal mode: only projects with active sessions (Running or Exited)
-                self.projects.iter().enumerate()
+                // Normal mode: only projects with active sessions, sorted by (scan_dir_label, name)
+                let mut indices: Vec<usize> = self.projects.iter().enumerate()
                     .filter(|(_, p)| !matches!(p.status, SessionStatus::NotStarted))
                     .map(|(i, _)| i)
-                    .collect()
+                    .collect();
+                indices.sort_by(|&a, &b| {
+                    let pa = &self.projects[a];
+                    let pb = &self.projects[b];
+                    pa.scan_dir_label.cmp(&pb.scan_dir_label)
+                        .then(pa.name.to_lowercase().cmp(&pb.name.to_lowercase()))
+                });
+                indices
             }
         } else {
             // Legacy mode: show all
@@ -278,7 +329,7 @@ impl State {
                     if let Some(ref layout_path) = self.session_layout {
                         switch_session_with_layout(
                             Some(&project.name),
-                            LayoutInfo::File(layout_path.clone()),
+                            LayoutInfo::File(layout_path.clone(), Default::default()),
                             Some(PathBuf::from(&project.path)),
                         );
                     } else {
@@ -338,49 +389,15 @@ keybinds {{
     }
 
     fn create_tab_with_sidebar(&self) {
-        let scan_dir = self.scan_dir.as_deref().unwrap_or("");
-        let session_layout = self.session_layout.as_deref().unwrap_or("");
-
-        let layout = if self.use_discovery {
-            format!(
-                r#"
-layout {{
-    pane size=1 borderless=true {{
-        plugin location="zellij:tab-bar"
-    }}
-    pane split_direction="vertical" {{
-        pane size="15%" name="Projects" {{
-            plugin location="file:~/.config/zellij/plugins/zellij-project-sidebar.wasm" {{
-                scan_dir "{scan_dir}"
-                session_layout "{session_layout}"
-                is_primary "false"
-            }}
-        }}
-        pane
-    }}
-    pane size=1 borderless=true {{
-        plugin location="file:~/.config/zellij/plugins/zellij-attention.wasm" {{
-            enabled "true"
-            waiting_icon "⏳"
-            completed_icon "✅"
-        }}
-    }}
-}}
-"#
-            )
+        // Use the session_layout file so new tabs match the user's default_tab_template.
+        // Hardcoding a layout string here forces specific plugin paths and is fragile;
+        // the layout file already describes the correct tab structure.
+        if let Some(ref layout_path) = self.session_layout {
+            new_tabs_with_layout_info(LayoutInfo::File(layout_path.clone(), Default::default()));
         } else {
-            // Legacy mode — plain tab
-            String::from(
-                r#"
-layout {
-    pane
-}
-"#
-            )
-        };
-
-        new_tabs_with_layout(&layout);
-        eprintln!("Created new tab with sidebar layout");
+            // Fallback: plain tab when no session_layout is configured
+            new_tabs_with_layout("layout { pane }");
+        }
     }
 
     fn toggle_visibility(&mut self) {
@@ -392,7 +409,7 @@ layout {
             eprintln!("Sidebar deactivated");
         } else {
             set_selectable(true);
-            focus_plugin_pane(get_plugin_ids().plugin_id, false);
+            focus_plugin_pane(get_plugin_ids().plugin_id, false, false);
             self.is_focused = true;
             eprintln!("Sidebar activated");
         }
@@ -400,10 +417,18 @@ layout {
 
     // --- Discovery ---
 
-    fn trigger_scan(&self) {
-        if let Some(ref dir) = self.scan_dir {
+    fn trigger_scan(&mut self) {
+        self.discovered_dirs.clear();
+        self.scan_complete = false;
+        self.pending_scans = self.scan_dirs.len();
+        if self.pending_scans == 0 {
+            self.scan_complete = true;
+            return;
+        }
+        for dir in &self.scan_dirs {
             let mut ctx = BTreeMap::new();
             ctx.insert(CMD_KEY.to_string(), CMD_SCAN_DIR.to_string());
+            ctx.insert(CMD_SCAN_DIR_LABEL.to_string(), path_to_label(dir));
             run_command(
                 &["find", dir, "-maxdepth", "1", "-mindepth", "1", "-type", "d", "-not", "-name", ".*"],
                 ctx,
@@ -421,7 +446,7 @@ layout {
             .map(|idx| self.projects[idx].name.clone());
 
         self.projects = self.discovered_dirs.iter()
-            .map(|(name, path)| {
+            .map(|(name, path, label)| {
                 let status = self.cached_statuses
                     .get(name)
                     .cloned()
@@ -431,6 +456,7 @@ layout {
                 Project {
                     name: name.clone(),
                     path: path.clone(),
+                    scan_dir_label: label.clone(),
                     status,
                     metadata,
                 }
@@ -573,35 +599,66 @@ layout {
         let mut lines = Vec::new();
         let filtered = self.filtered_indices();
 
-        if self.browse_mode && !filtered.is_empty() {
-            lines.push(RenderLine::Header("All projects".to_string()));
-        }
+        // Render cards grouped by scan_dir_label (works for both browse and normal mode)
+        // filtered is already sorted by (scan_dir_label, name) from filtered_indices()
+        if !filtered.is_empty() {
+            let has_multiple_groups = {
+                let mut labels: Vec<&str> = filtered.iter()
+                    .map(|&i| self.projects[i].scan_dir_label.as_str())
+                    .collect();
+                labels.dedup();
+                labels.len() > 1
+            };
 
-        let total = filtered.len();
-        for (fi, &i) in filtered.iter().enumerate() {
-            let project = &self.projects[i];
-
-            if fi == 0 {
-                lines.push(RenderLine::CardTop);
-            } else {
-                lines.push(RenderLine::CardDivider);
+            if self.browse_mode && !has_multiple_groups {
+                lines.push(RenderLine::Header("All projects".to_string()));
             }
 
-            lines.push(RenderLine::ProjectRow(i));
+            let total = filtered.len();
+            let mut current_label: Option<&str> = None;
+            let mut group_open = false;
 
-            // Detail line when there's meaningful content
-            let multi_tab = matches!(project.status, SessionStatus::Running { tab_count, .. } if tab_count > 1);
-            let has_command = matches!(project.status, SessionStatus::Running { active_command: Some(_), .. });
-            let ai_state = self.ai_states.get(&project.name);
-            let has_claude = ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown));
-            let has_pills = !project.metadata.pills.is_empty();
-            let has_progress = project.metadata.progress_pct.is_some();
-            if multi_tab || has_command || has_claude || has_pills || has_progress {
-                lines.push(RenderLine::ProjectDetail(i));
-            }
+            for (fi, &i) in filtered.iter().enumerate() {
+                let project = &self.projects[i];
+                let label = project.scan_dir_label.as_str();
 
-            if fi == total - 1 {
-                lines.push(RenderLine::CardBottom);
+                let group_changed = has_multiple_groups && current_label != Some(label);
+
+                if group_changed {
+                    if group_open {
+                        lines.push(RenderLine::CardBottom);
+                    }
+                    lines.push(RenderLine::Header(label.to_string()));
+                    lines.push(RenderLine::CardTop);
+                    current_label = Some(label);
+                    group_open = true;
+                } else if fi == 0 {
+                    lines.push(RenderLine::CardTop);
+                    group_open = true;
+                } else {
+                    lines.push(RenderLine::CardDivider);
+                }
+
+                lines.push(RenderLine::ProjectRow(i));
+
+                let multi_tab = matches!(project.status, SessionStatus::Running { tab_count, .. } if tab_count > 1);
+                let has_command = matches!(project.status, SessionStatus::Running { active_command: Some(_), .. });
+                let ai_state = self.ai_states.get(&project.name);
+                let has_claude = ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown));
+                let has_pills = !project.metadata.pills.is_empty();
+                let has_progress = project.metadata.progress_pct.is_some();
+                if multi_tab || has_command || has_claude || has_pills || has_progress {
+                    lines.push(RenderLine::ProjectDetail(i));
+                }
+
+                let is_last = fi == total - 1;
+                let next_is_new_group = has_multiple_groups && filtered.get(fi + 1)
+                    .map(|&next_i| self.projects[next_i].scan_dir_label.as_str() != label)
+                    .unwrap_or(false);
+                if is_last || next_is_new_group {
+                    lines.push(RenderLine::CardBottom);
+                    group_open = false;
+                }
             }
         }
 
@@ -639,18 +696,19 @@ layout {
     }
 
     fn render_project_name_line(&self, project: &Project, is_selected: bool, cols: usize) -> Text {
-        let needs_attention = self.attention_sessions.contains(&project.name);
         let is_current_session = matches!(&project.status, SessionStatus::Running { is_current: true, .. });
 
         // Determine icon + color based on state priority
+        // needs_attention: pipe-based (same session) OR state-file-based "waiting" (cross-session)
         let ai_state = self.ai_states.get(&project.name);
+        let needs_attention = self.attention_sessions.contains(&project.name)
+            || matches!(ai_state, Some(AgentState::Waiting));
         let (status_icon, dot_color) = if needs_attention {
             ("!", COLOR_MAGENTA)      // ! = needs attention (magenta)
         } else {
             match ai_state {
                 Some(AgentState::Active) => ("▶", COLOR_GREEN),    // ▶ = Claude working (green)
-                Some(AgentState::Waiting) | Some(AgentState::Idle) =>
-                    ("■", COLOR_CYAN),                             // ■ = Claude stopped (cyan)
+                Some(AgentState::Idle) => ("■", COLOR_CYAN),       // ■ = Claude stopped (cyan)
                 _ => ("·", COLOR_ORANGE),                          // · = no AI state
             }
         };
@@ -704,7 +762,9 @@ layout {
         let ai_state = self.ai_states.get(&project.name);
         if ai_state.is_some() && !matches!(ai_state, Some(AgentState::Unknown)) {
             let count = self.ai_pane_count.get(&project.name).copied().unwrap_or(0);
-            let prefix = if count > 1 { format!("claude x{}", count) } else { "claude".to_string() };
+            let agent_name = self.ai_agent_name.get(&project.name).map(|s| s.as_str()).unwrap_or("agent");
+            eprintln!("render_detail[{}]: ai_state={:?} agent_name={:?} ai_agent_name_map_size={}", &project.name, ai_state, agent_name, self.ai_agent_name.len());
+            let prefix = if count > 1 { format!("{} x{}", agent_name, count) } else { agent_name.to_string() };
             let label = if matches!(ai_state, Some(AgentState::Active)) {
                 let elapsed = self.format_elapsed(&project.name);
                 if elapsed.is_empty() { prefix } else { format!("{} · {}", prefix, elapsed) }
@@ -803,102 +863,75 @@ layout {
     }
 
     fn load_ai_states(&mut self) {
-        // Read per-pane files: /tmp/sidebar-ai/<session>/<pane_id>
-        // Each file: "state timestamp [duration]"
-        // Aggregate per session: hottest state wins, count active panes
-        if let Ok(sessions) = std::fs::read_dir("/tmp/sidebar-ai") {
-            for session_entry in sessions.flatten() {
-                let session = match session_entry.file_name().to_str().map(|s| s.to_string()) {
-                    Some(s) => s,
-                    None => continue,
-                };
-                let path = session_entry.path();
-
-                // Handle both old format (session is a file) and new format (session is a dir)
-                if path.is_file() {
-                    self.load_ai_state_from_file(&session, &path);
-                    continue;
-                }
-                if !path.is_dir() { continue; }
-
-                let mut best_state = AgentState::Unknown;
-                let mut best_since: u64 = 0;
-                let mut best_duration: u64 = 0;
-                let mut active_count: usize = 0;
-
-                if let Ok(panes) = std::fs::read_dir(&path) {
-                    for pane_entry in panes.flatten() {
-                        if let Ok(data) = std::fs::read_to_string(pane_entry.path()) {
-                            let parts: Vec<&str> = data.trim().split(' ').collect();
-                            let state = match parts.first().copied() {
-                                Some("active") => AgentState::Active,
-                                Some("idle") => AgentState::Idle,
-                                Some("waiting") => AgentState::Waiting,
-                                _ => continue,
-                            };
-
-                            let ts = parts.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-                            let dur = parts.get(2).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-
-                            if matches!(state, AgentState::Active) {
-                                active_count += 1;
-                            }
-
-                            // Priority: Active > Waiting > Idle > Unknown
-                            let dominated = match (&best_state, &state) {
-                                (_, AgentState::Active) => true,
-                                (AgentState::Active, _) => false,
-                                (_, AgentState::Waiting) => true,
-                                (AgentState::Waiting, _) => false,
-                                (_, AgentState::Idle) => true,
-                                _ => false,
-                            };
-                            if dominated {
-                                best_state = state;
-                                best_since = ts;
-                                best_duration = dur;
-                            }
-                        }
-                    }
-                }
-
-                if !matches!(best_state, AgentState::Unknown) {
-                    self.ai_states.insert(session.clone(), best_state);
-                    if best_since > 0 {
-                        self.ai_state_since.insert(session.clone(), best_since);
-                    }
-                    if best_duration > 0 {
-                        self.ai_last_duration.insert(session.clone(), best_duration);
-                    }
-                    if active_count > 0 {
-                        self.ai_pane_count.insert(session, active_count);
-                    } else {
-                        self.ai_pane_count.remove(&session);
-                    }
-                }
-            }
-        }
+        // WASM filesystem access is sandboxed — use run_command to read state files on the host.
+        // Output format per line: "SESSION STATE TIMESTAMP DURATION [AGENT]"
+        // The shell aggregates per-session: hottest pane state wins.
+        let script = r#"
+dir=/tmp/sidebar-ai
+[ -d "$dir" ] || exit 0
+now=$(date +%s)
+stale=300
+for session_dir in "$dir"/*/; do
+  [ -d "$session_dir" ] || continue
+  session=$(basename "$session_dir")
+  best_rank=0; best_state=""; best_ts=0; best_dur=0; best_agent=""
+  for f in "$session_dir"*; do
+    [ -f "$f" ] || continue
+    read -r line < "$f" 2>/dev/null || continue
+    state=$(echo "$line" | awk '{print $1}')
+    ts=$(echo "$line" | awk '{print $2}')
+    dur=$(echo "$line" | awk '{print $3}')
+    agent=$(echo "$line" | awk '{print $4}')
+    # Skip non-idle states whose file hasn't been touched in >5 min (killed agent)
+    if [ "$state" != "idle" ]; then
+      mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+      age=$((now - mtime))
+      [ "$age" -gt "$stale" ] && continue
+    fi
+    case "$state" in
+      active) rank=3 ;;
+      waiting) rank=2 ;;
+      idle) rank=1 ;;
+      *) rank=0 ;;
+    esac
+    if [ "$rank" -gt "$best_rank" ]; then
+      best_rank=$rank; best_state=$state; best_ts=$ts; best_dur=$dur; best_agent=$agent
+    fi
+  done
+  [ -n "$best_state" ] && echo "$session $best_state $best_ts $best_dur $best_agent"
+done
+"#;
+        let mut ctx = BTreeMap::new();
+        ctx.insert(CMD_KEY.to_string(), CMD_LOAD_AI.to_string());
+        run_command_with_env_variables_and_cwd(
+            &["sh", "-c", script],
+            BTreeMap::new(),
+            PathBuf::from("/"),
+            ctx,
+        );
     }
 
-    fn load_ai_state_from_file(&mut self, session: &str, path: &std::path::Path) {
-        // Backward compat: old single-file format
-        if let Ok(data) = std::fs::read_to_string(path) {
-            let parts: Vec<&str> = data.trim().split(' ').collect();
-            let state = match parts.first().copied() {
+    fn apply_ai_states_from_output(&mut self, stdout: &[u8]) {
+        // Parse "SESSION STATE TIMESTAMP DURATION [AGENT]" lines from load_ai shell command
+        let output = String::from_utf8_lossy(stdout);
+        for line in output.lines() {
+            let parts: Vec<&str> = line.trim().split(' ').collect();
+            if parts.len() < 2 { continue; }
+            let session = parts[0];
+            let state = match parts.get(1).copied() {
                 Some("active") => AgentState::Active,
                 Some("idle") => AgentState::Idle,
                 Some("waiting") => AgentState::Waiting,
-                _ => return,
+                _ => continue,
             };
+            let ts = parts.get(2).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            let dur = parts.get(3).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            let agent = parts.get(4).copied().unwrap_or("").trim();
+
             self.ai_states.insert(session.to_string(), state);
-            if let Some(ts) = parts.get(1).and_then(|s| s.parse::<u64>().ok()) {
-                self.ai_state_since.insert(session.to_string(), ts);
-            }
-            if let Some(dur) = parts.get(2).and_then(|s| s.parse::<u64>().ok()) {
-                if dur > 0 {
-                    self.ai_last_duration.insert(session.to_string(), dur);
-                }
-            }
+            if ts > 0 { self.ai_state_since.insert(session.to_string(), ts); }
+            if dur > 0 { self.ai_last_duration.insert(session.to_string(), dur); }
+            if !agent.is_empty() { self.ai_agent_name.insert(session.to_string(), agent.to_string()); }
         }
     }
 
@@ -972,6 +1005,7 @@ layout {
                 projects.push(Project {
                     name: parts[0].to_string(),
                     path: parts[1].to_string(),
+                    scan_dir_label: String::new(),
                     status,
                     metadata: ProjectMetadata::default(),
                 });
@@ -999,13 +1033,20 @@ impl ZellijPlugin for State {
             };
         }
 
-        self.scan_dir = configuration.get("scan_dir").cloned();
-        self.session_layout = configuration.get("session_layout").cloned();
+        if let Some(dir) = configuration.get("scan_dir") {
+            self.scan_dirs.push(expand_tilde(dir));
+        }
+        let mut scan_idx = 1usize;
+        while let Some(dir) = configuration.get(&format!("scan_dir_{}", scan_idx)) {
+            self.scan_dirs.push(expand_tilde(dir));
+            scan_idx += 1;
+        }
+        self.session_layout = configuration.get("session_layout").map(|p| expand_tilde(p));
         self.is_primary = configuration.get("is_primary").map(|v| v != "false").unwrap_or(true);
-        self.use_discovery = self.scan_dir.is_some();
+        self.use_discovery = !self.scan_dirs.is_empty();
 
         if self.use_discovery {
-            eprintln!("Discovery mode: scan_dir={:?}", self.scan_dir);
+            eprintln!("Discovery mode: scan_dirs={:?}", self.scan_dirs);
         } else {
             let mut i = 0;
             while let Some(path_str) = configuration.get(&format!("project_{}", i)) {
@@ -1026,6 +1067,7 @@ impl ZellijPlugin for State {
                 self.projects.push(Project {
                     name,
                     path: path_str.clone(),
+                    scan_dir_label: String::new(),
                     status: SessionStatus::NotStarted,
                     metadata: ProjectMetadata::default(),
                 });
@@ -1098,19 +1140,21 @@ impl ZellijPlugin for State {
                     Some(CMD_SCAN_DIR) => {
                         if exit_code == Some(0) {
                             let output = String::from_utf8_lossy(&stdout);
-                            self.discovered_dirs = output
-                                .lines()
-                                .filter(|line| !line.is_empty())
-                                .map(|full_path| {
-                                    let name = PathBuf::from(full_path)
-                                        .file_name()
-                                        .and_then(|n| n.to_str())
-                                        .unwrap_or("unknown")
-                                        .to_string();
-                                    (name, full_path.to_string())
-                                })
-                                .collect();
-                            eprintln!("Discovered {} directories", self.discovered_dirs.len());
+                            let label = context.get(CMD_SCAN_DIR_LABEL).cloned().unwrap_or_default();
+                            self.discovered_dirs.extend(
+                                output
+                                    .lines()
+                                    .filter(|line| !line.is_empty())
+                                    .map(|full_path| {
+                                        let name = PathBuf::from(full_path)
+                                            .file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or("unknown")
+                                            .to_string();
+                                        (name, full_path.to_string(), label.clone())
+                                    })
+                            );
+                            eprintln!("Discovered {} directories so far", self.discovered_dirs.len());
                         } else {
                             eprintln!(
                                 "scan_dir failed (exit {:?}): {}",
@@ -1118,8 +1162,13 @@ impl ZellijPlugin for State {
                                 String::from_utf8_lossy(&stderr)
                             );
                         }
-                        self.scan_complete = true;
-                        self.rebuild_projects();
+                        if self.pending_scans > 0 {
+                            self.pending_scans -= 1;
+                        }
+                        if self.pending_scans == 0 {
+                            self.scan_complete = true;
+                            self.rebuild_projects();
+                        }
                         true
                     }
                     Some(CMD_GIT_BRANCH) => {
@@ -1134,6 +1183,10 @@ impl ZellijPlugin for State {
                         }
                         changed
                     }
+                    Some(CMD_LOAD_AI) => {
+                        self.apply_ai_states_from_output(&stdout);
+                        true
+                    }
                     _ => false,
                 }
             }
@@ -1146,8 +1199,11 @@ impl ZellijPlugin for State {
                     // AI state from pipe messages must survive SessionUpdate cycles
                     let known_names: BTreeSet<String> = self.cached_statuses.keys().cloned().collect();
                     self.cached_metadata.retain(|name, _| known_names.contains(name));
-                    // Prune stale AI states for sessions that no longer exist
-                    self.ai_states.retain(|name, _| known_names.contains(name));
+                    // Do NOT retain ai_states/ai_agent_name here — SessionUpdate fires on every
+                    // session switch and can wipe pipe-delivered state before it re-arrives.
+                    // Stale entries for truly deleted sessions are harmless (they won't be in
+                    // discovered_dirs and won't render).
+                    self.load_ai_states();
 
                     if self.scan_complete {
                         self.apply_cached_statuses();
@@ -1161,6 +1217,7 @@ impl ZellijPlugin for State {
                             .map(|(name, status)| Project {
                                 name: name.clone(),
                                 path: String::new(),
+                                scan_dir_label: String::new(),
                                 status: status.clone(),
                                 metadata: ProjectMetadata::default(),
                             })
@@ -1297,7 +1354,6 @@ impl ZellijPlugin for State {
                 }
                 BareKey::Char('r') if key.has_modifiers(&[KeyModifier::Alt]) => {
                     if self.use_discovery {
-                        self.scan_complete = false;
                         self.trigger_scan();
                     }
                     true
@@ -1507,33 +1563,38 @@ impl ZellijPlugin for State {
                 eprintln!("Sidebar activated via pipe (legacy focus_sidebar)");
                 true
             }
-            // sidebar::ai-active::{session} / sidebar::ai-idle::{session} / sidebar::ai-waiting::{session}
+            // sidebar::ai-active::{session}::{agent} (agent optional for backward compat)
             name if name.starts_with("sidebar::ai-active::") => {
-                let session = name.strip_prefix("sidebar::ai-active::").unwrap_or("").to_string();
+                let rest = name.strip_prefix("sidebar::ai-active::").unwrap_or("");
+                let (session, agent) = parse_session_agent(rest);
                 if !session.is_empty() {
-                    // Only reset timestamp if transitioning TO active
-                    if !matches!(self.ai_states.get(&session), Some(AgentState::Active)) {
-                        self.ai_state_since.insert(session.clone(), self.now_secs());
+                    if !matches!(self.ai_states.get(session), Some(AgentState::Active)) {
+                        self.ai_state_since.insert(session.to_string(), self.now_secs());
                     }
-                    self.ai_states.insert(session, AgentState::Active);
+                    self.ai_states.insert(session.to_string(), AgentState::Active);
+                    if let Some(a) = agent { self.ai_agent_name.insert(session.to_string(), a.to_string()); }
                     self.save_ai_states();
                 }
                 true
             }
             name if name.starts_with("sidebar::ai-idle::") => {
-                let session = name.strip_prefix("sidebar::ai-idle::").unwrap_or("").to_string();
+                let rest = name.strip_prefix("sidebar::ai-idle::").unwrap_or("");
+                let (session, agent) = parse_session_agent(rest);
                 if !session.is_empty() {
-                    self.ai_state_since.insert(session.clone(), self.now_secs());
-                    self.ai_states.insert(session, AgentState::Idle);
+                    self.ai_state_since.insert(session.to_string(), self.now_secs());
+                    self.ai_states.insert(session.to_string(), AgentState::Idle);
+                    if let Some(a) = agent { self.ai_agent_name.insert(session.to_string(), a.to_string()); }
                     self.save_ai_states();
                 }
                 true
             }
             name if name.starts_with("sidebar::ai-waiting::") => {
-                let session = name.strip_prefix("sidebar::ai-waiting::").unwrap_or("").to_string();
+                let rest = name.strip_prefix("sidebar::ai-waiting::").unwrap_or("");
+                let (session, agent) = parse_session_agent(rest);
                 if !session.is_empty() {
-                    self.ai_state_since.insert(session.clone(), self.now_secs());
-                    self.ai_states.insert(session, AgentState::Waiting);
+                    self.ai_state_since.insert(session.to_string(), self.now_secs());
+                    self.ai_states.insert(session.to_string(), AgentState::Waiting);
+                    if let Some(a) = agent { self.ai_agent_name.insert(session.to_string(), a.to_string()); }
                     self.save_ai_states();
                 }
                 true
